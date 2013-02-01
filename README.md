@@ -4,3 +4,4 @@ It's got one goal: fast S3 bucket<->bucket data sync.  Will do differential upda
 
 Supports S3 and S3-like cloud storages (like Google Cloud Storage in interoperability mode, for example).
 
+Brought to you by Shopify.
