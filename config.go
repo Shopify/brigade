@@ -12,13 +12,13 @@ type Target struct {
 	SecretAccessKey string
 }
 
-type Config struct {
-	Source      Target
-	Destination Target
+type ConfigType struct {
+	Source      *Target
+	Destination *Target
 	Workers     int
 }
 
-var env Config
+var Config ConfigType
 
 func readConfig() {
 	configFile := os.Getenv("ENV")
@@ -40,7 +40,7 @@ func readConfig() {
 }
 
 func loadConfig(source io.Reader) {
-	err := json.NewDecoder(source).Decode(&env)
+	err := json.NewDecoder(source).Decode(&Config)
 
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)

@@ -36,8 +36,8 @@ func SetupBuckets() error {
 	source := S3Connect(LoadTarget(sourceBucketName))
 	dest := S3Connect(LoadTarget(destBucketName))
 
-	sourceBucket := source.Connection.Bucket(source.Target.BucketName)
-	destBucket := dest.Connection.Bucket(dest.Target.BucketName)
+	sourceBucket := source.Bucket(sourceBucketName)
+	destBucket := dest.Bucket(destBucketName)
 
 	err := sourceBucket.PutBucket(s3.PublicRead)
 	if err != nil {
@@ -62,12 +62,12 @@ func SetupBuckets() error {
 func TestConnection(t *testing.T) {
 	conn := S3Connect(LoadTarget(sourceBucketName))
 
-	if conn.Connection == nil {
+	if conn == nil {
 		t.Error("Could not connect to S3 host.  Check network & credentials")
 	}
 }
 
-func TestList(t *testing.T) {
+func TestCopyDirectory(t *testing.T) {
 	err := SetupBuckets()
 
 	if err != nil {

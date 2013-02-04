@@ -11,18 +11,26 @@ var dirQueue *list.List
 var fileQueue chan string
 
 type S3Connection struct {
-	Connection *s3.S3
-	Target     *Target
+	Source      *s3.S3
+	Destination *s3.S3
 }
 
-func S3Connect(target *Target) *S3Connection {
-	s := &S3Connection{nil, target}
-	auth := aws.Auth{s.Target.AccessKey, s.Target.SecretAccessKey}
-	s.Connection = s3.New(auth, aws.Region{S3Endpoint: s.Target.Server})
+func S3Connect(t *Target) *s3.S3 {
+	auth := aws.Auth{t.AccessKey, t.SecretAccessKey}
+	return s3.New(auth, aws.Region{S3Endpoint: t.Server})
+}
 
-	if s.Connection == nil {
-		log.Fatalf("Could not connect to S3 endpoint %s", s.Target.Server)
+func S3Init() *S3Connection {
+	s := &S3Connection{S3Connect(Config.Source), S3Connect(Config.Destination)}
+
+	if s.Source == nil {
+		log.Fatalf("Could not connect to S3 endpoint %s", Config.Source.Server)
 	}
+
+	if s.Destination == nil {
+		log.Fatalf("Could not connect to S3 endpoint %s", Config.Destination.Server)
+	}
+
 	return s
 }
 
@@ -34,7 +42,7 @@ func CopyBucket() {
 	dirQueue = list.New()
 
 	// spawn workers
-	for i := 0; i < env.Workers; i++ {
+	for i := 0; i < Config.Workers; i++ {
 		go fileCopier()
 	}
 

@@ -14,39 +14,39 @@ func TestTargetLoadFromJSON(t *testing.T) {
 
 	loadConfig(jsonTarget)
 
-	if env.Source.Server != "s3.com" {
-		t.Error("env.Source.Server incorrect")
+	if Config.Source.Server != "s3.com" {
+		t.Error("Config.Source.Server incorrect")
 	}
 
-	if env.Source.BucketName != "source_bucket" {
-		t.Error("env.Source.BucketName incorrect")
+	if Config.Source.BucketName != "source_bucket" {
+		t.Error("Config.Source.BucketName incorrect")
 	}
 
-	if env.Source.AccessKey != "1234" {
-		t.Error("env.Source.AccessKey incorrect")
+	if Config.Source.AccessKey != "1234" {
+		t.Error("Config.Source.AccessKey incorrect")
 	}
 
-	if env.Source.SecretAccessKey != "MySecretAccessKey" {
-		t.Error("env.Source.SecretAccessKey incorrect")
+	if Config.Source.SecretAccessKey != "MySecretAccessKey" {
+		t.Error("Config.Source.SecretAccessKey incorrect")
 	}
 
-	if env.Destination.Server != "storage.google.com" {
-		t.Error("env.Destination.Server incorrect")
+	if Config.Destination.Server != "storage.google.com" {
+		t.Error("Config.Destination.Server incorrect")
 	}
 
-	if env.Destination.BucketName != "google_bucket" {
-		t.Error("env.Destination.BucketName incorrect")
+	if Config.Destination.BucketName != "google_bucket" {
+		t.Error("Config.Destination.BucketName incorrect")
 	}
 
-	if env.Destination.AccessKey != "abcd" {
-		t.Error("env.Destination.AccessKey incorrect")
+	if Config.Destination.AccessKey != "abcd" {
+		t.Error("Config.Destination.AccessKey incorrect")
 	}
 
-	if env.Destination.SecretAccessKey != "MyOtherSecretAccessKey" {
-		t.Error("env.Destination.SecretAccessKey incorrect")
+	if Config.Destination.SecretAccessKey != "MyOtherSecretAccessKey" {
+		t.Error("Config.Destination.SecretAccessKey incorrect")
 	}
 
-	if env.Workers != 20 {
-		t.Error("env.Workers incorrect")
+	if Config.Workers != 20 {
+		t.Error("Config.Workers incorrect")
 	}
 }
