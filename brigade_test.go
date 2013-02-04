@@ -28,7 +28,9 @@ type fileFixture struct {
 
 var fixtures []fileFixture = []fileFixture{
 	{"house", []byte("house data"), "text/plain", s3.PublicRead},
-	{"house2", []byte("house2 data"), "text/plain", s3.PublicRead}}
+	{"house2", []byte("house2 data"), "text/plain", s3.PublicRead},
+	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},
+	{"animals/dog", []byte("second cat"), "text/plain", s3.PublicRead}}
 
 func SetupBuckets() error {
 	source := S3Connect(LoadTarget(sourceBucketName))
@@ -45,6 +47,13 @@ func SetupBuckets() error {
 	err = destBucket.PutBucket(s3.PublicRead)
 	if err != nil {
 		return err
+	}
+
+	for i := 0; i < len(fixtures); i++ {
+		err = sourceBucket.Put(fixtures[i].key, fixtures[i].data, fixtures[i].mime, fixtures[i].perm)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
