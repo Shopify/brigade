@@ -47,7 +47,7 @@ func (s *S3Connection) fileWorker() {
 
 func InitLists() {
 	ScanDirs = list.New()
-  DelDirs = list.New()
+	DelDirs = list.New()
 }
 
 func (s *S3Connection) CopyBucket() {
@@ -60,41 +60,41 @@ func (s *S3Connection) CopyBucket() {
 }
 
 func inList(input string, list []string) bool {
-  for i := 0; i < len(list); i++ {
-    if (input == list[i]) {
-      return true
-    }
-  }
-  return false
+	for i := 0; i < len(list); i++ {
+		if input == list[i] {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *S3Connection) CopyDirectory(dir string) error {
 
 	sourceList, err := s.SourceBucket.List(dir, "/", "", 1000)
-  if err != nil {
-    return err
-  }
+	if err != nil {
+		return err
+	}
 
 	destList, err := s.DestBucket.List(dir, "/", "", 1000)
-  if err != nil {
-    return err
-  }
+	if err != nil {
+		return err
+	}
 
 	// push subdirectories onto directory queue
-  for i := 0; i < len(sourceList.CommonPrefixes); i++ {
-    ScanDirs.PushBack(sourceList.CommonPrefixes[i])
-  }
+	for i := 0; i < len(sourceList.CommonPrefixes); i++ {
+		ScanDirs.PushBack(sourceList.CommonPrefixes[i])
+	}
 
-  // push subdirectories that no longer exist onto delete queue
-  for i := 0; i < len(destList.CommonPrefixes); i++ {
-    if !inList(destList.CommonPrefixes[i], sourceList.CommonPrefixes) {
-      DelDirs.PushBack(destList.CommonPrefixes[i])
-    }
-  }
+	// push subdirectories that no longer exist onto delete queue
+	for i := 0; i < len(destList.CommonPrefixes); i++ {
+		if !inList(destList.CommonPrefixes[i], sourceList.CommonPrefixes) {
+			DelDirs.PushBack(destList.CommonPrefixes[i])
+		}
+	}
 
 	// push changed files onto file queue
 
-  return nil
+	return nil
 }
 
 func fileCopier() {

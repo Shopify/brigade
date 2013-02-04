@@ -30,11 +30,33 @@ type fileFixture struct {
 	perm s3.ACL
 }
 
-var fixtures []fileFixture = []fileFixture{
+var sourceFixtures []fileFixture = []fileFixture{
 	{"house", []byte("house data"), "text/plain", s3.PublicRead},
 	{"house2", []byte("house2 data"), "text/plain", s3.PublicRead},
+	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},
+	{"house4", []byte("house4 data"), "text/plain", s3.Private},
+	{"house5", []byte("house4 data"), "text/plain", s3.Private},
 	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},
 	{"animals/dog", []byte("second cat"), "text/plain", s3.PublicRead}}
+
+var destFixtures []fileFixture = []fileFixture{
+	{"house", []byte("house data"), "text/plain", s3.PublicRead},
+	{"house2", []byte("different house2 data"), "text/plain", s3.PublicRead},
+	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},
+	{"house4", []byte("house4 data"), "text/plain", s3.PublicRead},
+	{"house6", []byte("house4 data"), "text/plain", s3.Private},
+	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},
+	{"vehicles/truck", []byte("this is a truck"), "text/plain", s3.PublicRead}}
+
+func uploadFixtures(bucket *s3.Bucket, fixtures []fileFixture) error {
+	for i := 0; i < len(fixtures); i++ {
+		err := bucket.Put(fixtures[i].key, fixtures[i].data, fixtures[i].mime, fixtures[i].perm)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func SetupBuckets() error {
 	source := S3Connect(loadTarget(sourceBucketName))
@@ -53,11 +75,14 @@ func SetupBuckets() error {
 		return err
 	}
 
-	for i := 0; i < len(fixtures); i++ {
-		err = sourceBucket.Put(fixtures[i].key, fixtures[i].data, fixtures[i].mime, fixtures[i].perm)
-		if err != nil {
-			return err
-		}
+	err = uploadFixtures(sourceBucket, sourceFixtures)
+	if err != nil {
+		return err
+	}
+
+	err = uploadFixtures(destBucket, destFixtures)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -72,7 +97,7 @@ func TestConnection(t *testing.T) {
 }
 
 func TestCopyDirectory(t *testing.T) {
-  InitLists()
+	InitLists()
 
 	err := SetupBuckets()
 	if err != nil {
@@ -84,16 +109,24 @@ func TestCopyDirectory(t *testing.T) {
 
 	conn.CopyDirectory("")
 
-  if (ScanDirs.Len() != 1) {
-    t.Error("Nothing on ScanDirs queue")
-    return
-  }
+	if ScanDirs.Len() != 1 {
+		t.Error("Nothing on ScanDirs queue")
+		return
+	}
+	converted, ok := ScanDirs.Front().Value.(string)
+	if !ok || converted != "animals/" {
+		t.Error("CopyDirectory failed to push subdirectory onto ScanDirs")
+		return
+	}
 
-  converted, ok := ScanDirs.Front().Value.(string)
+	if DelDirs.Len() != 1 {
+		t.Error("Nothing on DelDirs queue")
+		return
+	}
+	converted, ok = DelDirs.Front().Value.(string)
+	if !ok || converted != "vehicles/" {
+		t.Error("CopyDirectory failed to push subdirectory onto DelDirs")
+		return
+	}
 
-  if (!ok || converted != "animals/") {
-    t.Error("CopyDirectory failed to push subdirectory onto queue")
-    return
-  }
 }
-
