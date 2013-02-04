@@ -19,6 +19,17 @@ func LoadTarget(bucket string) *Target {
 	return &Target{os.Getenv("AWS_HOST"), bucket, os.Getenv("ACCESS_KEY"), os.Getenv("SECRET_ACCESS_KEY")}
 }
 
+type fileFixture struct {
+	key  string
+	data []byte
+	mime string
+	perm s3.ACL
+}
+
+var fixtures []fileFixture = []fileFixture{
+	{"house", []byte("house data"), "text/plain", s3.PublicRead},
+	{"house2", []byte("house2 data"), "text/plain", s3.PublicRead}}
+
 func SetupBuckets() error {
 	source := S3Connect(LoadTarget(sourceBucketName))
 	dest := S3Connect(LoadTarget(destBucketName))
@@ -44,5 +55,13 @@ func TestConnection(t *testing.T) {
 
 	if conn.Connection == nil {
 		t.Error("Could not connect to S3 host.  Check network & credentials")
+	}
+}
+
+func TestList(t *testing.T) {
+	err := SetupBuckets()
+
+	if err != nil {
+		t.Error("Failed to set up buckets")
 	}
 }
