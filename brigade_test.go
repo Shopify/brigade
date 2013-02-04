@@ -15,8 +15,12 @@ func TestCredentials(t *testing.T) {
 	}
 }
 
-func LoadTarget(bucket string) *Target {
+func loadTarget(bucket string) *Target {
 	return &Target{os.Getenv("AWS_HOST"), bucket, os.Getenv("ACCESS_KEY"), os.Getenv("SECRET_ACCESS_KEY")}
+}
+
+func LoadTestConfig() {
+	Config = ConfigType{Source: loadTarget(sourceBucketName), Dest: loadTarget(destBucketName), Workers: 0}
 }
 
 type fileFixture struct {
@@ -33,8 +37,8 @@ var fixtures []fileFixture = []fileFixture{
 	{"animals/dog", []byte("second cat"), "text/plain", s3.PublicRead}}
 
 func SetupBuckets() error {
-	source := S3Connect(LoadTarget(sourceBucketName))
-	dest := S3Connect(LoadTarget(destBucketName))
+	source := S3Connect(loadTarget(sourceBucketName))
+	dest := S3Connect(loadTarget(destBucketName))
 
 	sourceBucket := source.Bucket(sourceBucketName)
 	destBucket := dest.Bucket(destBucketName)
@@ -60,7 +64,7 @@ func SetupBuckets() error {
 }
 
 func TestConnection(t *testing.T) {
-	conn := S3Connect(LoadTarget(sourceBucketName))
+	conn := S3Connect(loadTarget(sourceBucketName))
 
 	if conn == nil {
 		t.Error("Could not connect to S3 host.  Check network & credentials")
@@ -68,9 +72,28 @@ func TestConnection(t *testing.T) {
 }
 
 func TestCopyDirectory(t *testing.T) {
-	err := SetupBuckets()
+  InitLists()
 
+	err := SetupBuckets()
 	if err != nil {
 		t.Error("Failed to set up buckets")
 	}
+
+	LoadTestConfig()
+	conn := S3Init()
+
+	conn.CopyDirectory("")
+
+  if (ScanDirs.Len() != 1) {
+    t.Error("Nothing on ScanDirs queue")
+    return
+  }
+
+  converted, ok := ScanDirs.Front().Value.(string)
+
+  if (!ok || converted != "animals/") {
+    t.Error("CopyDirectory failed to push subdirectory onto queue")
+    return
+  }
 }
+

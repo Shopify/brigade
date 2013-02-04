@@ -13,9 +13,9 @@ type Target struct {
 }
 
 type ConfigType struct {
-	Source      *Target
-	Destination *Target
-	Workers     int
+	Source  *Target
+	Dest    *Target
+	Workers int
 }
 
 var Config ConfigType

@@ -7,7 +7,7 @@ func TestTargetLoadFromJSON(t *testing.T) {
 	jsonTarget := bytes.NewBufferString(`
     {
       "Source": {"Server": "s3.com", "BucketName": "source_bucket", "AccessKey": "1234", "SecretAccessKey": "MySecretAccessKey"},
-      "Destination": {"Server": "storage.google.com", "BucketName": "google_bucket", "AccessKey": "abcd", "SecretAccessKey": "MyOtherSecretAccessKey"},
+      "Dest": {"Server": "storage.google.com", "BucketName": "google_bucket", "AccessKey": "abcd", "SecretAccessKey": "MyOtherSecretAccessKey"},
       "Workers": 20
     }
   `)
@@ -30,20 +30,20 @@ func TestTargetLoadFromJSON(t *testing.T) {
 		t.Error("Config.Source.SecretAccessKey incorrect")
 	}
 
-	if Config.Destination.Server != "storage.google.com" {
-		t.Error("Config.Destination.Server incorrect")
+	if Config.Dest.Server != "storage.google.com" {
+		t.Error("Config.Dest.Server incorrect")
 	}
 
-	if Config.Destination.BucketName != "google_bucket" {
-		t.Error("Config.Destination.BucketName incorrect")
+	if Config.Dest.BucketName != "google_bucket" {
+		t.Error("Config.Dest.BucketName incorrect")
 	}
 
-	if Config.Destination.AccessKey != "abcd" {
-		t.Error("Config.Destination.AccessKey incorrect")
+	if Config.Dest.AccessKey != "abcd" {
+		t.Error("Config.Dest.AccessKey incorrect")
 	}
 
-	if Config.Destination.SecretAccessKey != "MyOtherSecretAccessKey" {
-		t.Error("Config.Destination.SecretAccessKey incorrect")
+	if Config.Dest.SecretAccessKey != "MyOtherSecretAccessKey" {
+		t.Error("Config.Dest.SecretAccessKey incorrect")
 	}
 
 	if Config.Workers != 20 {
