@@ -15,13 +15,15 @@ type S3Connection struct {
 	Target     *Target
 }
 
-func (s *S3Connection) Connect() {
+func S3Connect(target *Target) *S3Connection {
+	s := &S3Connection{nil, target}
 	auth := aws.Auth{s.Target.AccessKey, s.Target.SecretAccessKey}
 	s.Connection = s3.New(auth, aws.Region{S3Endpoint: s.Target.Server})
 
 	if s.Connection == nil {
 		log.Fatalf("Could not connect to S3 endpoint %s", s.Target.Server)
 	}
+	return s
 }
 
 func (s *S3Connection) fileWorker() {
