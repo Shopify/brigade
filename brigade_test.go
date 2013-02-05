@@ -96,6 +96,28 @@ func TestConnection(t *testing.T) {
 	}
 }
 
+func TestFindKey(t *testing.T) {
+	Init()
+
+	err := SetupBuckets()
+	if err != nil {
+		t.Error("Failed to set up buckets")
+	}
+
+	LoadTestConfig()
+	conn := S3Init()
+
+	sourceList, err := conn.SourceBucket.List("animals/", "/", "", 1000)
+	if err != nil {
+		t.Error("Failed to list animals dir")
+	}
+
+	key, ok := findKey("animals/cat", sourceList)
+	if !ok || key.Key != "animals/cat" {
+		t.Error("Failed to find animals/cat in source bucket by key")
+	}
+}
+
 func TestCopyDirectory(t *testing.T) {
 	Init()
 

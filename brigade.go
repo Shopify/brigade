@@ -84,6 +84,21 @@ func inList(input string, list []string) bool {
 	return false
 }
 
+var nilKey s3.Key
+
+func findKey(name string, list *s3.ListResp) (s3.Key, bool) {
+	for i := 0; i < len(list.Contents); i++ {
+		if list.Contents[i].Key == name {
+			return list.Contents[i], true
+		}
+	}
+	return nilKey, false
+}
+
+func keyChanged(src s3.Key, dest s3.Key) bool {
+	return src.Size != dest.Size || src.ETag != dest.ETag || src.StorageClass != dest.StorageClass
+}
+
 func (s *S3Connection) CopyDirectory(dir string) error {
 
 	sourceList, err := s.SourceBucket.List(dir, "/", "", 1000)
@@ -109,6 +124,13 @@ func (s *S3Connection) CopyDirectory(dir string) error {
 	}
 
 	// push changed files onto file queue
+	for i := 0; i < len(sourceList.Contents); i++ {
+		key := sourceList.Contents[i]
+		existing, found := findKey(key.Key, destList)
+		if !found || keyChanged(key, existing) {
+			CopyFiles <- key.Key
+		}
+	}
 
 	return nil
 }
