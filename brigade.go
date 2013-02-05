@@ -9,10 +9,9 @@ import (
 
 var Errors *list.List
 var ScanDirs *list.List
-var DelDirs *list.List
 
 var CopyFiles chan string
-var DelFiles chan string
+var DeleteFiles chan string
 
 type S3Connection struct {
 	Source       *s3.S3
@@ -49,11 +48,10 @@ func (s *S3Connection) fileWorker() {
 
 func Init() {
 	ScanDirs = list.New()
-	DelDirs = list.New()
 	Errors = list.New()
 
 	CopyFiles = make(chan string, 1000)
-	DelFiles = make(chan string, 100)
+	DeleteFiles = make(chan string, 100)
 
 	// spawn workers
 	for i := 0; i < Config.Workers; i++ {
@@ -119,7 +117,7 @@ func (s *S3Connection) CopyDirectory(dir string) error {
 	// push subdirectories that no longer exist onto delete queue
 	for i := 0; i < len(destList.CommonPrefixes); i++ {
 		if !inList(destList.CommonPrefixes[i], sourceList.CommonPrefixes) {
-			DelDirs.PushBack(destList.CommonPrefixes[i])
+			ScanDirs.PushBack(destList.CommonPrefixes[i])
 		}
 	}
 
@@ -129,6 +127,15 @@ func (s *S3Connection) CopyDirectory(dir string) error {
 		existing, found := findKey(key.Key, destList)
 		if !found || keyChanged(key, existing) {
 			CopyFiles <- key.Key
+		}
+	}
+
+	// push removed files onto delete list
+	for i := 0; i < len(destList.Contents); i++ {
+		key := destList.Contents[i]
+		_, found := findKey(key.Key, sourceList)
+		if !found {
+			DeleteFiles <- key.Key
 		}
 	}
 

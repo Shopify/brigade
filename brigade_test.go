@@ -42,8 +42,6 @@ var sourceFixtures []fileFixture = []fileFixture{
 var destFixtures []fileFixture = []fileFixture{
 	{"house", []byte("house data"), "text/plain", s3.PublicRead},               // identical
 	{"house2", []byte("different house2 data"), "text/plain", s3.PublicRead},   // differing data
-	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},               // differing MIME
-	{"house4", []byte("house4 data"), "text/plain", s3.PublicRead},             // differing ACL
 	{"house6", []byte("house6 data"), "text/plain", s3.Private},                // to be deleted
 	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},          // identical
 	{"vehicles/truck", []byte("this is a truck"), "text/plain", s3.PublicRead}} // to be deleted
@@ -131,7 +129,7 @@ func TestCopyDirectory(t *testing.T) {
 
 	conn.CopyDirectory("")
 
-	if ScanDirs.Len() != 1 {
+	if ScanDirs.Len() != 2 {
 		t.Error("Nothing on ScanDirs queue")
 		return
 	}
@@ -141,13 +139,9 @@ func TestCopyDirectory(t *testing.T) {
 		return
 	}
 
-	if DelDirs.Len() != 1 {
-		t.Error("Nothing on DelDirs queue")
-		return
-	}
-	converted, ok = DelDirs.Front().Value.(string)
+	converted, ok = ScanDirs.Back().Value.(string)
 	if !ok || converted != "vehicles/" {
-		t.Error("CopyDirectory failed to push subdirectory onto DelDirs")
+		t.Error("CopyDirectory failed to push subdirectory onto ScanDirs")
 		return
 	}
 }
@@ -170,18 +164,7 @@ func TestCopyBucket(t *testing.T) {
 		return
 	}
 
-	if DelDirs.Len() != 1 {
-		t.Error("Nothing on DelDirs queue")
-		return
-	}
-
-	converted, ok := DelDirs.Front().Value.(string)
-	if !ok || converted != "vehicles/" {
-		t.Error("CopyBucket failed to push subdirectory onto DelDirs")
-		return
-	}
-
-	copyExpected := []string{"house2", "house3", "house4", "house5", "animals/dog"}
+	copyExpected := []string{"house2", "house5", "animals/dog"}
 
 	if len(CopyFiles) != len(copyExpected) {
 		t.Errorf("CopyBucket found %d files to copy but we expected %d", len(CopyFiles), len(copyExpected))
@@ -194,4 +177,19 @@ func TestCopyBucket(t *testing.T) {
 			t.Errorf("CopyBucket file #%d was %s but expected %s", i, file, copyExpected[i])
 		}
 	}
+
+	delExpected := []string{"house6", "vehicles/truck"}
+
+	if len(DeleteFiles) != len(delExpected) {
+		t.Errorf("CopyBucket found %d files to delete but we expected %d", len(DeleteFiles), len(delExpected))
+		return
+	}
+
+	for i := 0; i < len(delExpected); i++ {
+		file := <-DeleteFiles
+		if file != delExpected[i] {
+			t.Errorf("CopyBucket file to delete #%d was %s but expected %s", i, file, delExpected[i])
+		}
+	}
+
 }
