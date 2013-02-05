@@ -35,18 +35,18 @@ var sourceFixtures []fileFixture = []fileFixture{
 	{"house2", []byte("house2 data"), "text/plain", s3.PublicRead},
 	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},
 	{"house4", []byte("house4 data"), "text/plain", s3.Private},
-	{"house5", []byte("house4 data"), "text/plain", s3.Private},
+	{"house5", []byte("house4 data"), "text/plain", s3.Private}, // only exists in source
 	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},
-	{"animals/dog", []byte("second cat"), "text/plain", s3.PublicRead}}
+	{"animals/dog", []byte("second cat"), "text/plain", s3.PublicRead}} // only exists in source
 
 var destFixtures []fileFixture = []fileFixture{
-	{"house", []byte("house data"), "text/plain", s3.PublicRead},
-	{"house2", []byte("different house2 data"), "text/plain", s3.PublicRead},
-	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},
-	{"house4", []byte("house4 data"), "text/plain", s3.PublicRead},
-	{"house6", []byte("house4 data"), "text/plain", s3.Private},
-	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},
-	{"vehicles/truck", []byte("this is a truck"), "text/plain", s3.PublicRead}}
+	{"house", []byte("house data"), "text/plain", s3.PublicRead},               // identical
+	{"house2", []byte("different house2 data"), "text/plain", s3.PublicRead},   // differing data
+	{"house3", []byte("house3 data"), "text/xml", s3.PublicRead},               // differing MIME
+	{"house4", []byte("house4 data"), "text/plain", s3.PublicRead},             // differing ACL
+	{"house6", []byte("house6 data"), "text/plain", s3.Private},                // to be deleted
+	{"animals/cat", []byte("first cat"), "text/plain", s3.PublicRead},          // identical
+	{"vehicles/truck", []byte("this is a truck"), "text/plain", s3.PublicRead}} // to be deleted
 
 func uploadFixtures(bucket *s3.Bucket, fixtures []fileFixture) error {
 	for i := 0; i < len(fixtures); i++ {
@@ -97,7 +97,7 @@ func TestConnection(t *testing.T) {
 }
 
 func TestCopyDirectory(t *testing.T) {
-	InitLists()
+	Init()
 
 	err := SetupBuckets()
 	if err != nil {
@@ -128,5 +128,48 @@ func TestCopyDirectory(t *testing.T) {
 		t.Error("CopyDirectory failed to push subdirectory onto DelDirs")
 		return
 	}
+}
 
+func TestCopyBucket(t *testing.T) {
+	Init()
+
+	err := SetupBuckets()
+	if err != nil {
+		t.Error("Failed to set up buckets")
+	}
+
+	LoadTestConfig()
+	conn := S3Init()
+
+	conn.CopyBucket()
+
+	if ScanDirs.Len() != 0 {
+		t.Error("CopyBucket left directories to scan")
+		return
+	}
+
+	if DelDirs.Len() != 1 {
+		t.Error("Nothing on DelDirs queue")
+		return
+	}
+
+	converted, ok := DelDirs.Front().Value.(string)
+	if !ok || converted != "vehicles/" {
+		t.Error("CopyBucket failed to push subdirectory onto DelDirs")
+		return
+	}
+
+	copyExpected := []string{"house2", "house3", "house4", "house5", "animals/dog"}
+
+	if len(CopyFiles) != len(copyExpected) {
+		t.Errorf("CopyBucket found %d files to copy but we expected %d", len(CopyFiles), len(copyExpected))
+		return
+	}
+
+	for i := 0; i < len(copyExpected); i++ {
+		file := <-CopyFiles
+		if file != copyExpected[i] {
+			t.Errorf("CopyBucket file #%d was %s but expected %s", i, file, copyExpected[i])
+		}
+	}
 }

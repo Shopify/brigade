@@ -7,10 +7,12 @@ import (
 	"log"
 )
 
+var Errors *list.List
 var ScanDirs *list.List
 var DelDirs *list.List
 
-var FileQueue chan string
+var CopyFiles chan string
+var DelFiles chan string
 
 type S3Connection struct {
 	Source       *s3.S3
@@ -45,18 +47,32 @@ func (s *S3Connection) fileWorker() {
 	// pull files off channel, copy with permissions
 }
 
-func InitLists() {
+func Init() {
 	ScanDirs = list.New()
 	DelDirs = list.New()
-}
+	Errors = list.New()
 
-func (s *S3Connection) CopyBucket() {
+	CopyFiles = make(chan string, 1000)
+	DelFiles = make(chan string, 100)
 
 	// spawn workers
 	for i := 0; i < Config.Workers; i++ {
 		go fileCopier()
 	}
+}
 
+func (s *S3Connection) CopyBucket() {
+	ScanDirs.PushBack("")
+	for ScanDirs.Len() > 0 {
+		dir, ok := ScanDirs.Remove(ScanDirs.Front()).(string)
+		if !ok {
+			log.Fatalf("Invalid value found on directory queue")
+		}
+		err := s.CopyDirectory(dir)
+		if err != nil {
+			Errors.PushBack(err)
+		}
+	}
 }
 
 func inList(input string, list []string) bool {
