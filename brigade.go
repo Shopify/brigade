@@ -42,9 +42,13 @@ func S3Init() *S3Connection {
 	return s
 }
 
-func (s *S3Connection) fileWorker() {
+func (s *S3Connection) fileCopier() {
 	// pull files off channel, copy with permissions
+  
+
 }
+
+var worker []*S3Connection
 
 func Init() {
 	ScanDirs = list.New()
@@ -53,9 +57,12 @@ func Init() {
 	CopyFiles = make(chan string, 1000)
 	DeleteFiles = make(chan string, 100)
 
+  worker = make([]*S3Connection, Config.Workers)
+
 	// spawn workers
 	for i := 0; i < Config.Workers; i++ {
-		go fileCopier()
+    worker[i] = S3Init()
+		go worker[i].fileCopier()
 	}
 }
 
@@ -142,5 +149,4 @@ func (s *S3Connection) CopyDirectory(dir string) error {
 	return nil
 }
 
-func fileCopier() {
-}
+
