@@ -2,9 +2,10 @@ package brigade
 
 import (
 	"container/list"
+	"github.com/boourns/goamz/s3"
 	"launchpad.net/goamz/aws"
-	"launchpad.net/goamz/s3"
 	"log"
+	"strconv"
 )
 
 var Errors *list.List
@@ -43,9 +44,37 @@ func S3Init() *S3Connection {
 }
 
 func (s *S3Connection) fileCopier() {
-	// pull files off channel, copy with permissions
-  
+	for {
+		key := <-CopyFiles
+		source, err := s.SourceBucket.GetResponse(key)
+		if err != nil {
+			Errors.PushBack(err)
+			continue
+		}
 
+		if source.Header["Content-Length"] == nil || len(source.Header["Content-Length"]) != 1 {
+			log.Printf("Missing Content-Length for key %s\n", key)
+			continue
+		}
+
+		if source.Header["Content-Type"] == nil || len(source.Header["Content-Type"]) != 1 {
+			log.Printf("Missing Content-Type for key %s\n", key)
+			continue
+		}
+
+		length, err := strconv.ParseInt(source.Header["Content-Length"][0], 10, 64)
+		if err != nil {
+			Errors.PushBack(err)
+			continue
+		}
+
+		mime := source.Header["Content-Type"][0]
+
+		err = s.DestBucket.PutReader(key, source.Body, length, mime, s3.PublicRead)
+		if err != nil {
+			Errors.PushBack(err)
+		}
+	}
 }
 
 var worker []*S3Connection
@@ -57,11 +86,11 @@ func Init() {
 	CopyFiles = make(chan string, 1000)
 	DeleteFiles = make(chan string, 100)
 
-  worker = make([]*S3Connection, Config.Workers)
+	worker = make([]*S3Connection, Config.Workers)
 
 	// spawn workers
 	for i := 0; i < Config.Workers; i++ {
-    worker[i] = S3Init()
+		worker[i] = S3Init()
 		go worker[i].fileCopier()
 	}
 }
@@ -148,5 +177,3 @@ func (s *S3Connection) CopyDirectory(dir string) error {
 
 	return nil
 }
-
-

@@ -1,7 +1,7 @@
 package brigade
 
 import (
-	"launchpad.net/goamz/s3"
+	"github.com/boourns/goamz/s3"
 	"os"
 	"testing"
 )
@@ -192,4 +192,25 @@ func TestCopyBucket(t *testing.T) {
 		}
 	}
 
+}
+
+func TestReadMIME(t *testing.T) {
+	Init()
+
+	err := SetupBuckets()
+	if err != nil {
+		t.Error("Failed to set up buckets")
+	}
+
+	LoadTestConfig()
+	conn := S3Init()
+
+	resp, err := conn.SourceBucket.GetResponse("house3")
+	if err != nil {
+		t.Errorf("Failed to get a response for fixture")
+	}
+
+	if resp.Header["Content-Type"][0] != "text/xml" {
+		t.Errorf("Content-Type was incorrect")
+	}
 }
