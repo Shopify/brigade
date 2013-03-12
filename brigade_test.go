@@ -1,4 +1,4 @@
-package brigade
+package main
 
 import (
 	"github.com/boourns/goamz/s3"

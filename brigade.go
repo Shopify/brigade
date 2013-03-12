@@ -1,4 +1,4 @@
-package brigade
+package main
 
 import (
 	"container/list"
