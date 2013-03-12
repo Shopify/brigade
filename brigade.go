@@ -22,6 +22,10 @@ type S3Connection struct {
 }
 
 func S3Connect(t *Target) *s3.S3 {
+  if t == nil {
+    log.Fatalf("Target was not loaded")
+  }
+
 	auth := aws.Auth{t.AccessKey, t.SecretAccessKey}
 	return s3.New(auth, aws.Region{S3Endpoint: t.Server})
 }
@@ -46,6 +50,9 @@ func S3Init() *S3Connection {
 func (s *S3Connection) fileCopier() {
 	for {
 		key := <-CopyFiles
+    Stats.files++
+    Stats.working++
+
 		source, err := s.SourceBucket.GetResponse(key)
 		if err != nil {
 			Errors.PushBack(err)
@@ -73,7 +80,12 @@ func (s *S3Connection) fileCopier() {
 		err = s.DestBucket.PutReader(key, source.Body, length, mime, s3.PublicRead)
 		if err != nil {
 			Errors.PushBack(err)
-		}
+      Stats.errors++
+		} else {
+      Stats.bytes += length
+    }
+
+    Stats.working--
 	}
 }
 
@@ -89,6 +101,8 @@ func Init() {
 	worker = make([]*S3Connection, Config.Workers)
 
 	// spawn workers
+  log.Printf("Spawning %d workers", Config.Workers)
+
 	for i := 0; i < Config.Workers; i++ {
 		worker[i] = S3Init()
 		go worker[i].fileCopier()
@@ -107,6 +121,7 @@ func (s *S3Connection) CopyBucket() {
 			Errors.PushBack(err)
 		}
 	}
+  printStats()
 }
 
 func inList(input string, list []string) bool {
@@ -134,6 +149,7 @@ func keyChanged(src s3.Key, dest s3.Key) bool {
 }
 
 func (s *S3Connection) CopyDirectory(dir string) error {
+  Stats.directories++
 
 	sourceList, err := s.SourceBucket.List(dir, "/", "", 1000)
 	if err != nil {
