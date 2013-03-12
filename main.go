@@ -1,19 +1,15 @@
-package main
+package brigade
 
 import (
+  "github.com/tobi/airbrake-go"
+  "github.com/shopify/stats/env"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"runtime/pprof"
-	"strconv"
 )
 
 func main() {
-	var err error
-
 	airbrake.Endpoint = "https://exceptions.shopify.com/notifier_api/v2/notices.xml"
 	airbrake.ApiKey = "795dbf40b8743457f64fe9b9abc843fa"
 
@@ -28,16 +24,16 @@ func main() {
 		defer logFile.Close()
 	}
 
-	logPeriod, _ := strconv.Atoi(env.Get("logPeriod"))
+  log := 300
 
-	if logPeriod > 0 {
-		go logStats(logPeriod)
+	if log > 0 {
+		go statsWorker(log)
 	}
 
   readConfig()
 
   Init()
-  bucketCopier := S3Connection()
+  bucketCopier := S3Init()
   bucketCopier.CopyBucket()
 }
 
