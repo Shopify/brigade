@@ -1,3 +1,40 @@
+// Command brigade-s3-sync walks an S3 bucket and saves all the keys in
+// the bucket. The file will contain one key in JSON form per line, and
+// will be compressed with gzip.
+//
+// Listing an S3 bucket is equivalent to walking a graph. Starting
+// from the root node ("/"),
+//    1. process the node (list all the S3 keys)
+//    2. generate followers to the node (common prefixes from the List call)
+//    3. visit each followers as in 1.
+// While in a perfect world, the graph of an S3 bucket would be a tree,
+// there are some duplicates and considering the bucket as a DAG is safer.
+//
+// So the algorithm is a BFS, where followers on the fringe are visited
+// concurrently. The fringe contains Job objects, which are essentially
+// holding the edge to visit + where to put the followers.
+// When a worker visited a Job edge, it updates the Job and send it
+// back on the `result` channel.
+//
+// The main loop keeps of the jobs it has sent to workers (workSet), and
+// of the followers it need to send Job objects for. If `dedup` is set,
+// it will also
+//
+// After each iteration of the search, there are three possible states:
+//  1: there were new followers, thus workset not empty.
+//     loop will continue and wait for results.
+//
+//  2: there were no followers, but workset not yet empty.
+//     loop will continue because further results are possible.
+//
+//  3: there were no followers, and workset is empty.
+//     loop will stop because no further results are expected.
+//
+// If `dedup` is set, the search will track all visited nodes and avoid
+// cycles. This will consume a lot more memory, but can avoid duplicate
+// references to keys. Those duplicates are rare (<1000 over 40 millions).
+// If we accept that duplicates occur, we can save a lot of memory by
+// avoiding to track the set of visited edges (>40millions such edges).
 package main
 
 import (
@@ -23,8 +60,13 @@ import (
 )
 
 const (
+	// MaxList is the maximum number of keys to accept from a call to LIST an s3
+	// prefix.
 	MaxList = 10000
-	Para    = 200
+	// Para is the number of concurrent LIST request done on S3. At 200, the
+	// worker queue is typically always busy and the network is saturated, so
+	// there is no point increasing this.
+	Para = 200
 )
 
 var (
@@ -42,22 +84,17 @@ func init() {
 
 }
 
+// pfatal is the same as elog.Fatalf, but prints the flag usages before
+// exiting the process.
 func pfatal(format string, args ...interface{}) {
 	elog.Printf(format, args...)
 	flag.PrintDefaults()
 	os.Exit(2)
 }
 
-func mustURL(path string) *url.URL {
-	u, err := url.Parse(path)
-	if err != nil {
-		log.Fatalf("%q must be a valid URL: %v", path, err)
-	}
-	return u
-}
-
 func main() {
 
+	// setup the error log to write on stderr and to a file
 	efile, err := os.OpenFile(os.Args[0]+".elog", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 	if err != nil {
 		log.Fatal(err)
@@ -67,6 +104,7 @@ func main() {
 		brush.Red("[error] ").String(),
 		log.Ltime|log.Lshortfile)
 
+	// read the flags
 	var (
 		access      = os.Getenv("AWS_ACCESS_KEY")
 		secret      = os.Getenv("AWS_SECRET_KEY")
@@ -100,9 +138,10 @@ func main() {
 		defer profile.Start(profile.MemProfile).Stop()
 	}
 
+	// create the output file for the bucket keys
 	file, err := os.Create(*dst)
 	if err != nil {
-		pfatal("couldn't open %q: %v", *dst, err)
+		elog.Fatalf("couldn't open %q: %v", *dst, err)
 	}
 	defer func() { _ = file.Close() }()
 	gw := gzip.NewWriter(file)
@@ -110,6 +149,7 @@ func main() {
 
 	keys := make(chan s3.Key, Para)
 
+	// Start a key encoder, which writes to the file concurrently
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func(wg *sync.WaitGroup, w io.Writer) {
@@ -117,17 +157,20 @@ func main() {
 		enc := json.NewEncoder(w)
 		for k := range keys {
 			if err := enc.Encode(k); err != nil {
-				log.Fatalf("Couldn't encode key %q: %v", k.Key, err)
+				elog.Fatalf("Couldn't encode key %q: %v", k.Key, err)
 			}
 		}
 	}(&wg, gw)
 
+	// list all the keys in the source bucket, sending each key to the
+	// file writer worker.
 	err = listAllKeys(sss, srcU, *deduplicate, func(k s3.Key) { keys <- k })
+	// wait until the file writer is done
 	close(keys)
 	wg.Wait()
 
 	if err != nil {
-		log.Fatalf("Couldn't list buckets: %v", err)
+		elog.Fatalf("Couldn't list buckets: %v", err)
 	}
 }
 
@@ -152,35 +195,36 @@ func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error
 
 func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error {
 
+	// Datastructures needed for the BFS
 	fringe := make(chan *Job, Para)
 	result := make(chan *Job, Para)
 
-	wg := sync.WaitGroup{}
-	for i := 0; i < Para; i++ {
-		wg.Add(1)
-		go listWorker(&wg, bkt, fringe, result)
-	}
-
 	visited := make(map[string]struct{})
 	workSet := make(map[string]struct{})
+	var followers []*Job
 
 	firstJob := newJob(root)
 
 	workSet[firstJob.path] = q
 	fringe <- firstJob
 
+	// Stats to track progress
 	qtstream := quantile.NewTargeted(0.50, 0.95)
 	var lastRep time.Time
 	var newkeys, newleads, totalkeys, jobspersec int64
 	var totalsize uint64
+	var mem runtime.MemStats
 
-	mem := runtime.MemStats{}
-
-	// while there are jobs sent to workers
-	var followers []*Job
+	// Start the workers, which expand the edges of the fringe
+	wg := sync.WaitGroup{}
+	for i := 0; i < Para; i++ {
+		wg.Add(1)
+		go listWorker(&wg, bkt, fringe, result)
+	}
 
 	for len(workSet) != 0 {
 
+		// every second, print some stats about current state of the world.
 		if time.Since(lastRep) > time.Second {
 			runtime.ReadMemStats(&mem)
 			p50 := time.Duration(int64(qtstream.Query(0.50)))
@@ -206,6 +250,9 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 
 		var doneJob *Job
 		if len(followers) > 0 {
+			// if there are followers, either try to send
+			// a new job on the fringe, or receive a result
+			// from a worker
 			select {
 			case fringe <- followers[len(followers)-1]:
 				followers = followers[:len(followers)-1]
@@ -213,28 +260,31 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 			case doneJob = <-result:
 			}
 		} else {
+			// if there are no followers, all we can do is
+			// wait for a result to arrive
 			doneJob = <-result
 		}
-
-		delete(workSet, doneJob.path)
-
+		// track some metrics
 		jobspersec++
 		qtstream.Insert(float64(doneJob.duration.Nanoseconds()))
+
+		// remove the job from the set of jobs we are waiting for
+		delete(workSet, doneJob.path)
+
+		// if the job was in error, maybe try to reenqueue it
 		if doneJob.err != nil {
-			err := doneJob.err
 			if doneJob.retryLeft > 0 {
 				doneJob.retryLeft--
 				doneJob.err = nil
 				elog.Printf("job %d failed, %d retries left: %v",
 					doneJob.id,
 					doneJob.retryLeft,
-					err)
+					doneJob.err)
 				followers = append(followers, doneJob)
 			} else {
 				elog.Printf("job %d failed, retries exhausted! %v",
-					doneJob.id, err)
+					doneJob.id, doneJob.err)
 			}
-
 			continue
 		}
 
@@ -266,6 +316,7 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 				}
 			}
 
+			// don't send jobs for paths we already planned to explore
 			if _, ok := workSet[newjob.path]; ok {
 				// already queued
 			} else {
@@ -278,16 +329,8 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 		}
 		newkeys += int64(len(doneJob.keys))
 		newleads += int64(len(doneJob.followers))
-		// three cases:
-		//  1: there were new followers, thus workset not empty.
-		//     loop will continue and wait for results.
-		//
-		//  2: there were no followers, but workset not yet empty.
-		//     loop will continue because further results are possible.
-		//
-		//  3: there were no followers, and workset is empty.
-		//     loop will stop because no further results are expected.
 	}
+
 	log.Printf("no more jobs, closing")
 	// invariant: no jobs are on the fringe, no results in the workset,
 	// it is thus safe to tell the workers to stop waiting.
@@ -302,33 +345,46 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 	return nil
 }
 
+// inflight tracks how many requests to S3 are currently inflight. Use atomic calls
+// to access this value.
 var inflight int64
 
+// list workers receives jobs and LIST the path in those jobs, sleeping between
+// retryable errors before re-enqueing them.
 func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<- *Job) {
 	defer wg.Done()
 	for job := range jobs {
+		// track duration + inflight requests
 		atomic.AddInt64(&inflight, 1)
 		start := time.Now()
+		// list this path on the bkt
 		res, err := bkt.List(job.path, "/", "", MaxList)
 		job.duration = time.Since(start)
 		atomic.AddInt64(&inflight, -1)
 
 		if err != nil {
 			job.err = err
+			// when there's an error, sleep for a bit before reenqueuing
+			// the job. This avoids retrying keys that are on a partition
+			// that is overloaded, and various network issues.
 			sleepFor := time.Second * time.Duration(job.retryLeft)
 			elog.Printf("worker-sleep-on-error=%v", sleepFor)
 			time.Sleep(sleepFor)
 			elog.Printf("worker-woke-up")
 		} else {
+			// if all went well, set the job results
 			job.keys = res.Contents
 			job.followers = res.CommonPrefixes
 		}
+		// send the job result back to the main loop, which will
+		// decided to reenqueue or not if there was an error
 		out <- job
 	}
 }
 
-var jobIDCounter uint64
-
+// Job holds the state of visiting an path in S3. This state includes
+// the last error, the number of retries left, the duration of the
+// last call, they keys found in the path and the followers at that path.
 type Job struct {
 	id        uint64
 	path      string
@@ -338,6 +394,8 @@ type Job struct {
 	keys      []s3.Key
 	followers []string
 }
+
+var jobIDCounter uint64
 
 func newJob(rel string) *Job {
 	var relpath string
@@ -354,6 +412,16 @@ func newJob(rel string) *Job {
 	}
 }
 
+// Helper for URL creation.
+func mustURL(path string) *url.URL {
+	u, err := url.Parse(path)
+	if err != nil {
+		log.Fatalf("%q must be a valid URL: %v", path, err)
+	}
+	return u
+}
+
+// Pretty print, aligned logs.
 type lineTabWriter struct {
 	tab *tabwriter.Writer
 }
