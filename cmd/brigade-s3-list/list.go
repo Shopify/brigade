@@ -41,7 +41,6 @@ import (
 	"encoding/json"
 	"flag"
 	"github.com/aybabtme/color/brush"
-	"github.com/bmizerany/perks/quantile"
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/s3"
 	"github.com/davecheney/profile"
@@ -50,7 +49,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"path"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -73,7 +71,6 @@ const (
 )
 
 var (
-	q    = struct{}{}
 	root = mustURL("/")
 	elog *log.Logger
 )
@@ -85,36 +82,6 @@ func init() {
 	log.SetOutput(&lineTabWriter{w})
 	log.SetFlags(log.Ltime)
 	log.SetPrefix(brush.Blue("[info] ").String())
-}
-
-// Job holds the state of visiting an path in S3. This state includes
-// the last error, the number of retries left, the duration of the
-// last call, they keys found in the path and the followers at that path.
-type Job struct {
-	id        uint64
-	path      string
-	duration  time.Duration
-	retryLeft int
-	err       error
-	keys      []s3.Key
-	followers []string
-}
-
-var jobIDCounter uint64
-
-func newJob(rel string) *Job {
-	var relpath string
-	if path.IsAbs(rel) {
-		relpath = rel[1:]
-	} else {
-		relpath = rel
-	}
-	return &Job{
-		id:        atomic.AddUint64(&jobIDCounter, 1),
-		retryLeft: MaxRetry,
-		path:      relpath,
-		// other fields nil-value is correct
-	}
 }
 
 func main() {
@@ -213,69 +180,50 @@ func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error
 	return err
 }
 
-func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error {
+func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Key)) error {
 
-	// Datastructures needed for the BFS
+	// Data structures needed for the BFS
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
+	// LIFO will do a DFS
+	// FIFO will do a BFS
+	followers := &fifoJobs{}
 	visited := make(map[string]struct{})
-	workSet := make(map[string]struct{})
-	var followers []*Job
+	workSet := make(jobSet)
 
 	firstJob := newJob(root)
 
-	workSet[firstJob.path] = q
+	workSet.Add(firstJob)
 	fringe <- firstJob
 
 	// Stats to track progress
-	qtstream := quantile.NewTargeted(0.50, 0.95)
 	var lastRep time.Time
-	var newkeys, newleads, totalkeys, jobspersec int64
-	var totalsize uint64
-	var mem runtime.MemStats
+	stats := newWalkStats()
 
-	// Start the workers, which expand the edges of the fringe
+	// Start the workers, which expands the edges of the fringe
 	wg := sync.WaitGroup{}
 	for i := 0; i < Concurrency; i++ {
 		wg.Add(1)
 		go listWorker(&wg, bkt, fringe, result)
 	}
 
-	for len(workSet) != 0 {
+	for !workSet.IsEmpty() {
 
 		// every second, print some stats about current state of the world.
 		if time.Since(lastRep) > time.Second {
-			runtime.ReadMemStats(&mem)
-			p50 := time.Duration(int64(qtstream.Query(0.50)))
-			p95 := time.Duration(int64(qtstream.Query(0.95)))
-			qtstream.Reset()
-			log.Printf("mem=%s\tjobs/s=%s\twork=%s\tfollow=%s\tinflight=%s\tkeys=%s\tbktsize=%s\tnew=%s\tleads=%s\tp50=%v\tp95=%v",
-				humanize.Bytes(mem.Sys-mem.HeapReleased),
-				humanize.Comma(jobspersec),
-				humanize.Comma(int64(len(workSet))),
-				humanize.Comma(int64(len(followers))),
-				humanize.Comma(atomic.LoadInt64(&inflight)),
-				humanize.Comma(totalkeys),
-				humanize.Bytes(totalsize),
-				humanize.Comma(newkeys),
-				humanize.Comma(newleads),
-				p50,
-				p95)
-			newkeys = 0
-			newleads = 0
-			jobspersec = 0
+			stats.printProgress(workSet, followers)
 			lastRep = time.Now()
 		}
 
 		var doneJob *Job
-		if len(followers) > 0 {
+		if !followers.IsEmpty() {
 			// if there are followers, either try to send
 			// a new job on the fringe, or receive a result
 			// from a worker
 			select {
-			case fringe <- followers[len(followers)-1]:
-				followers = followers[:len(followers)-1]
+			case fringe <- followers.Peek():
+				_ = followers.Remove()
 				continue
 			case doneJob = <-result:
 			}
@@ -284,71 +232,32 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 			// wait for a result to arrive
 			doneJob = <-result
 		}
-		// track some metrics
-		jobspersec++
-		qtstream.Insert(float64(doneJob.duration.Nanoseconds()))
-
 		// remove the job from the set of jobs we are waiting for
-		delete(workSet, doneJob.path)
+		workSet.Delete(doneJob)
+
+		// track some metrics
+		stats.jobspersec++
+		stats.qtstream.Insert(float64(doneJob.duration.Nanoseconds()))
 
 		// if the job was in error, maybe try to reenqueue it
 		if doneJob.err != nil {
-			if doneJob.retryLeft > 0 {
-				doneJob.retryLeft--
-				doneJob.err = nil
-				elog.Printf("job %d failed, %d retries left: %v",
-					doneJob.id,
-					doneJob.retryLeft,
-					doneJob.err)
-				followers = append(followers, doneJob)
+			if shouldReenqueue(doneJob) {
+				elog.Printf("job %d failed, %d retries left: %v", doneJob.id, doneJob.retryLeft, doneJob.err)
+				followers.Add(doneJob)
 			} else {
-				elog.Printf("job %d failed, retries exhausted! %v",
-					doneJob.id, doneJob.err)
+				elog.Printf("job %d failed, retries exhausted! %v", doneJob.id, doneJob.err)
 			}
 			continue
 		}
 
-		// invoke call back for each key
-		for _, key := range doneJob.keys {
-			if dedup {
-				if _, ok := visited[key.Key]; ok {
-					elog.Printf("deduplicate-key=%q", key.Key)
-					continue
-				}
-				visited[key.Key] = q
-			}
+		visitKeys(doneJob.keys, keyVisitor, dedup, visited, stats)
 
-			totalkeys++
-			totalsize += uint64(key.Size)
-			f(key)
+		for _, job := range jobsFromFollowers(doneJob.followers, workSet, dedup, visited) {
+			followers.Add(job)
 		}
 
-		// for each follower
-		for _, follow := range doneJob.followers {
-			// prepare a new job, add it to the worker set and
-			// send it to workers
-			newjob := newJob(follow)
-
-			if dedup {
-				if _, ok := visited[newjob.path]; ok {
-					elog.Printf("deduplicate-job=%q", newjob.path)
-					continue
-				}
-			}
-
-			// don't send jobs for paths we already planned to explore
-			if _, ok := workSet[newjob.path]; ok {
-				// already queued
-			} else {
-				if dedup {
-					visited[newjob.path] = q
-				}
-				workSet[newjob.path] = q
-				followers = append(followers, newjob)
-			}
-		}
-		newkeys += int64(len(doneJob.keys))
-		newleads += int64(len(doneJob.followers))
+		stats.newkeys += int64(len(doneJob.keys))
+		stats.newleads += int64(len(doneJob.followers))
 	}
 
 	log.Printf("no more jobs, closing")
@@ -363,6 +272,59 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 	log.Printf("workers stopped")
 
 	return nil
+}
+
+func shouldReenqueue(job *Job) bool {
+	if job.retryLeft > 0 {
+		job.retryLeft--
+		job.err = nil
+		return true
+	}
+	return false
+}
+
+func visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}, stats *walkStats) {
+	for _, key := range keys {
+		if dedup {
+			if _, ok := visited[key.Key]; ok {
+				elog.Printf("deduplicate-key=%q", key.Key)
+				continue
+			}
+			visited[key.Key] = struct{}{}
+		}
+
+		stats.totalkeys++
+		stats.totalsize += uint64(key.Size)
+		visitor(key)
+	}
+}
+
+func jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visited map[string]struct{}) []*Job {
+	var newJobs []*Job
+	for _, follow := range newFollowers {
+		// prepare a new job, add it to the worker set and
+		// send it to workers
+		newjob := newJob(follow)
+
+		if dedup {
+			if _, ok := visited[newjob.path]; ok {
+				elog.Printf("deduplicate-job=%q", newjob.path)
+				continue
+			}
+		}
+
+		// don't send jobs for paths we already planned to explore
+		if workset.Contains(newjob) {
+			// already queued
+		} else {
+			if dedup {
+				visited[newjob.path] = struct{}{}
+			}
+			workset.Add(newjob)
+			newJobs = append(newJobs, newjob)
+		}
+	}
+	return newJobs
 }
 
 // inflight tracks how many requests to S3 are currently inflight. Use atomic calls
@@ -401,42 +363,4 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 		// decided to reenqueue or not if there was an error
 		out <- job
 	}
-}
-
-// Helpers
-
-// Helper for URL creation.
-func mustURL(path string) *url.URL {
-	u, err := url.Parse(path)
-	if err != nil {
-		log.Fatalf("%q must be a valid URL: %v", path, err)
-	}
-	return u
-}
-
-// flagFatal is the same as elog.Fatalf, but prints the flag usages before
-// exiting the process.
-func flagFatal(format string, args ...interface{}) {
-	elog.Printf(format, args...)
-	flag.PrintDefaults()
-	os.Exit(2)
-}
-
-func lognotnil(err error) {
-	if err != nil {
-		elog.Print(err)
-	}
-}
-
-// Pretty print, aligned logs.
-type lineTabWriter struct {
-	tab *tabwriter.Writer
-}
-
-func (l *lineTabWriter) Write(p []byte) (int, error) {
-	n, err := l.tab.Write(p)
-	if err != nil {
-		return n, err
-	}
-	return n, l.tab.Flush()
 }
