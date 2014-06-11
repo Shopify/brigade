@@ -16,9 +16,8 @@
 // When a worker visited a Job edge, it updates the Job and send it
 // back on the `result` channel.
 //
-// The main loop keeps of the jobs it has sent to workers (workSet), and
-// of the followers it need to send Job objects for. If `dedup` is set,
-// it will also
+// The main loop keeps trakcs of the jobs it has sent to workers (workSet),
+// and of the followers it need to create Job objects for.
 //
 // After each iteration of the search, there are three possible states:
 //  1: there were new followers, thus workset not empty.
@@ -63,10 +62,10 @@ const (
 	// MaxList is the maximum number of keys to accept from a call to LIST an s3
 	// prefix.
 	MaxList = 10000
-	// Para is the number of concurrent LIST request done on S3. At 200, the
+	// Concurrency is the number of concurrent LIST request done on S3. At 200, the
 	// worker queue is typically always busy and the network is saturated, so
 	// there is no point increasing this.
-	Para = 200
+	Concurrency = 200
 )
 
 var (
@@ -90,6 +89,12 @@ func pfatal(format string, args ...interface{}) {
 	elog.Printf(format, args...)
 	flag.PrintDefaults()
 	os.Exit(2)
+}
+
+func lognotnil(err error) {
+	if err != nil {
+		elog.Print(err)
+	}
 }
 
 func main() {
@@ -143,31 +148,30 @@ func main() {
 	if err != nil {
 		elog.Fatalf("couldn't open %q: %v", *dst, err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() { lognotnil(file.Close()) }()
 	gw := gzip.NewWriter(file)
-	defer func() { _ = gw.Close() }()
+	defer func() { lognotnil(gw.Close()) }()
 
-	keys := make(chan s3.Key, Para)
+	keys := make(chan s3.Key, Concurrency)
 
 	// Start a key encoder, which writes to the file concurrently
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, w io.Writer) {
-		defer wg.Done()
+	encDone := make(chan struct{})
+	go func(w io.Writer) {
+		defer close(encDone)
 		enc := json.NewEncoder(w)
 		for k := range keys {
 			if err := enc.Encode(k); err != nil {
 				elog.Fatalf("Couldn't encode key %q: %v", k.Key, err)
 			}
 		}
-	}(&wg, gw)
+	}(gw)
 
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
 	err = listAllKeys(sss, srcU, *deduplicate, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
 	close(keys)
-	wg.Wait()
+	<-encDone
 
 	if err != nil {
 		elog.Fatalf("Couldn't list buckets: %v", err)
@@ -196,8 +200,8 @@ func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error
 func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error {
 
 	// Datastructures needed for the BFS
-	fringe := make(chan *Job, Para)
-	result := make(chan *Job, Para)
+	fringe := make(chan *Job, Concurrency)
+	result := make(chan *Job, Concurrency)
 
 	visited := make(map[string]struct{})
 	workSet := make(map[string]struct{})
@@ -217,7 +221,7 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, f func(key s3.Key)) error
 
 	// Start the workers, which expand the edges of the fringe
 	wg := sync.WaitGroup{}
-	for i := 0; i < Para; i++ {
+	for i := 0; i < Concurrency; i++ {
 		wg.Add(1)
 		go listWorker(&wg, bkt, fringe, result)
 	}
