@@ -66,6 +66,10 @@ const (
 	// worker queue is typically always busy and the network is saturated, so
 	// there is no point increasing this.
 	Concurrency = 200
+
+	// MaxRetry is the number of time a worker will retry a LIST on a path,
+	// given that the error was retryable.
+	MaxRetry = 5
 )
 
 var (
@@ -107,7 +111,7 @@ func newJob(rel string) *Job {
 	}
 	return &Job{
 		id:        atomic.AddUint64(&jobIDCounter, 1),
-		retryLeft: 5,
+		retryLeft: MaxRetry,
 		path:      relpath,
 		// other fields nil-value is correct
 	}
@@ -383,7 +387,8 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 			// when there's an error, sleep for a bit before reenqueuing
 			// the job. This avoids retrying keys that are on a partition
 			// that is overloaded, and various network issues.
-			sleepFor := time.Second * time.Duration(job.retryLeft)
+			attempsSoFar := MaxRetry - job.retryLeft + 1
+			sleepFor := time.Second * time.Duration(attempsSoFar)
 			elog.Printf("worker-sleep-on-error=%v", sleepFor)
 			time.Sleep(sleepFor)
 			elog.Printf("worker-woke-up")
