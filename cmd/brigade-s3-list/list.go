@@ -70,6 +70,7 @@ const (
 
 var (
 	q    = struct{}{}
+	root = mustURL("/")
 	elog *log.Logger
 )
 
@@ -80,20 +81,35 @@ func init() {
 	log.SetOutput(&lineTabWriter{w})
 	log.SetFlags(log.Ltime)
 	log.SetPrefix(brush.Blue("[info] ").String())
-
 }
 
-// pfatal is the same as elog.Fatalf, but prints the flag usages before
-// exiting the process.
-func pfatal(format string, args ...interface{}) {
-	elog.Printf(format, args...)
-	flag.PrintDefaults()
-	os.Exit(2)
+// Job holds the state of visiting an path in S3. This state includes
+// the last error, the number of retries left, the duration of the
+// last call, they keys found in the path and the followers at that path.
+type Job struct {
+	id        uint64
+	path      string
+	duration  time.Duration
+	retryLeft int
+	err       error
+	keys      []s3.Key
+	followers []string
 }
 
-func lognotnil(err error) {
-	if err != nil {
-		elog.Print(err)
+var jobIDCounter uint64
+
+func newJob(rel string) *Job {
+	var relpath string
+	if path.IsAbs(rel) {
+		relpath = rel[1:]
+	} else {
+		relpath = rel
+	}
+	return &Job{
+		id:        atomic.AddUint64(&jobIDCounter, 1),
+		retryLeft: 5,
+		path:      relpath,
+		// other fields nil-value is correct
 	}
 }
 
@@ -104,10 +120,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() { _ = efile.Close() }()
-	elog = log.New(io.MultiWriter(os.Stderr, efile),
-		brush.Red("[error] ").String(),
-		log.Ltime|log.Lshortfile)
+	defer func() { lognotnil(efile.Close()) }()
+	elog = log.New(io.MultiWriter(os.Stderr, efile), brush.Red("[error] ").String(), log.Ltime|log.Lshortfile)
 
 	// read the flags
 	var (
@@ -125,15 +139,15 @@ func main() {
 	region, validRegion := aws.Regions[*regionName]
 	switch {
 	case access == "":
-		pfatal("needs an AWS access key\n")
+		flagFatal("needs an AWS access key\n")
 	case secret == "":
-		pfatal("needs an AWS secret key\n")
+		flagFatal("needs an AWS secret key\n")
 	case *src == "":
-		pfatal("needs a source bucket\n")
+		flagFatal("needs a source bucket\n")
 	case srcErr != nil:
-		pfatal("%q is not a valid source URL: %v", *src, srcErr)
+		flagFatal("%q is not a valid source URL: %v", *src, srcErr)
 	case !validRegion:
-		pfatal("%q is not a valid region name", *regionName)
+		flagFatal("%q is not a valid region name", *regionName)
 	}
 
 	auth := aws.Auth{AccessKey: access, SecretKey: secret}
@@ -177,8 +191,6 @@ func main() {
 		elog.Fatalf("Couldn't list buckets: %v", err)
 	}
 }
-
-var root = mustURL("/")
 
 func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error {
 
@@ -386,35 +398,7 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 	}
 }
 
-// Job holds the state of visiting an path in S3. This state includes
-// the last error, the number of retries left, the duration of the
-// last call, they keys found in the path and the followers at that path.
-type Job struct {
-	id        uint64
-	path      string
-	duration  time.Duration
-	retryLeft int
-	err       error
-	keys      []s3.Key
-	followers []string
-}
-
-var jobIDCounter uint64
-
-func newJob(rel string) *Job {
-	var relpath string
-	if path.IsAbs(rel) {
-		relpath = rel[1:]
-	} else {
-		relpath = rel
-	}
-	return &Job{
-		id:        atomic.AddUint64(&jobIDCounter, 1),
-		retryLeft: 5,
-		path:      relpath,
-		// other fields nil-value is correct
-	}
-}
+// Helpers
 
 // Helper for URL creation.
 func mustURL(path string) *url.URL {
@@ -423,6 +407,20 @@ func mustURL(path string) *url.URL {
 		log.Fatalf("%q must be a valid URL: %v", path, err)
 	}
 	return u
+}
+
+// flagFatal is the same as elog.Fatalf, but prints the flag usages before
+// exiting the process.
+func flagFatal(format string, args ...interface{}) {
+	elog.Printf(format, args...)
+	flag.PrintDefaults()
+	os.Exit(2)
+}
+
+func lognotnil(err error) {
+	if err != nil {
+		elog.Print(err)
+	}
 }
 
 // Pretty print, aligned logs.
