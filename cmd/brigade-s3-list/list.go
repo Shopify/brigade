@@ -47,6 +47,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"io"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"runtime"
@@ -82,6 +83,7 @@ func init() {
 	log.SetOutput(&lineTabWriter{w})
 	log.SetFlags(log.Ltime)
 	log.SetPrefix(brush.Blue("[info] ").String())
+
 }
 
 func main() {
@@ -186,9 +188,10 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
-	// LIFO will do a DFS
 	// FIFO will do a BFS
-	followers := &fifoJobs{}
+	// followers := &fifoJobs{}
+	// LIFO will do a DFS
+	followers := &lifoJobs{}
 	visited := make(map[string]struct{})
 	workSet := make(jobSet)
 
@@ -198,8 +201,8 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	fringe <- firstJob
 
 	// Stats to track progress
-	var lastRep time.Time
 	stats := newWalkStats()
+	defer stats.Stop()
 
 	// Start the workers, which expands the edges of the fringe
 	wg := sync.WaitGroup{}
@@ -209,12 +212,6 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	}
 
 	for !workSet.IsEmpty() {
-
-		// every second, print some stats about current state of the world.
-		if time.Since(lastRep) > time.Second {
-			stats.printProgress(workSet, followers)
-			lastRep = time.Now()
-		}
 
 		var doneJob *Job
 		if !followers.IsEmpty() {
@@ -236,18 +233,26 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 		workSet.Delete(doneJob)
 
 		// track some metrics
+		stats.Lock()
+		stats.worktodo = int64(len(workSet))
+		stats.followers = int64(followers.Len())
 		stats.jobspersec++
 		stats.qtstream.Insert(float64(doneJob.duration.Nanoseconds()))
+		stats.Unlock()
 
 		// if the job was in error, maybe try to reenqueue it
 		if doneJob.err != nil {
-			if shouldReenqueue(doneJob) {
-				elog.Printf("job %d failed, %d retries left: %v", doneJob.id, doneJob.retryLeft, doneJob.err)
+			if doneJob.retryLeft > 0 {
+				doneJob.retryLeft--
+				elog.Printf("job=%d\tretrying\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
+				doneJob.err = nil
 				followers.Add(doneJob)
 			} else {
-				elog.Printf("job %d failed, retries exhausted! %v", doneJob.id, doneJob.err)
+				elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 			}
 			continue
+		} else if doneJob.retryLeft != MaxRetry {
+			log.Printf("job=%d\trescued\tretries=%d", doneJob.id, doneJob.retryLeft)
 		}
 
 		visitKeys(doneJob.keys, keyVisitor, dedup, visited, stats)
@@ -256,8 +261,10 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 			followers.Add(job)
 		}
 
+		stats.Lock()
 		stats.newkeys += int64(len(doneJob.keys))
 		stats.newleads += int64(len(doneJob.followers))
+		stats.Unlock()
 	}
 
 	log.Printf("no more jobs, closing")
@@ -272,15 +279,6 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	log.Printf("workers stopped")
 
 	return nil
-}
-
-func shouldReenqueue(job *Job) bool {
-	if job.retryLeft > 0 {
-		job.retryLeft--
-		job.err = nil
-		return true
-	}
-	return false
 }
 
 func visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}, stats *walkStats) {
@@ -349,8 +347,9 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 			// when there's an error, sleep for a bit before reenqueuing
 			// the job. This avoids retrying keys that are on a partition
 			// that is overloaded, and various network issues.
-			attempsSoFar := MaxRetry - job.retryLeft + 1
-			sleepFor := time.Second * time.Duration(attempsSoFar)
+			attempsSoFar := float64(MaxRetry - job.retryLeft + 1)
+			backoff := math.Pow(2.0, attempsSoFar)
+			sleepFor := time.Duration(backoff) * time.Second
 			elog.Printf("worker-sleep-on-error=%v", sleepFor)
 			time.Sleep(sleepFor)
 			elog.Printf("worker-woke-up")

@@ -7,6 +7,7 @@ import (
 	"log"
 	"path"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -90,6 +91,11 @@ func newJob(rel string) *Job {
 
 // stats to print the progress of a bucket walk
 type walkStats struct {
+	sync.Mutex
+
+	worktodo  int64
+	followers int64
+
 	newkeys    int64
 	newleads   int64
 	totalkeys  int64
@@ -97,15 +103,30 @@ type walkStats struct {
 	totalsize  uint64
 	mem        runtime.MemStats
 	qtstream   *quantile.Stream
+
+	tick *time.Ticker
 }
 
 func newWalkStats() *walkStats {
-	return &walkStats{
+	stats := &walkStats{
 		qtstream: quantile.NewTargeted(0.50, 0.95),
+		tick:     time.NewTicker(time.Second),
 	}
+
+	go func() {
+		for _ = range stats.tick.C {
+			stats.Lock()
+			stats.printProgress()
+			stats.Unlock()
+		}
+	}()
+
+	return stats
 }
 
-func (w *walkStats) printProgress(workset jobSet, followers jobsColl) {
+func (w *walkStats) Stop() { w.tick.Stop() }
+
+func (w *walkStats) printProgress() {
 	curInflight := atomic.LoadInt64(&inflight)
 
 	runtime.ReadMemStats(&w.mem)
@@ -115,8 +136,8 @@ func (w *walkStats) printProgress(workset jobSet, followers jobsColl) {
 	log.Printf("mem=%s\tjobs/s=%s\twork=%s\tfollow=%s\tinflight=%s\tkeys=%s\tbktsize=%s\tnew=%s\tleads=%s\tp50=%v\tp95=%v",
 		humanize.Bytes(w.mem.Sys-w.mem.HeapReleased),
 		humanize.Comma(w.jobspersec),
-		humanize.Comma(int64(len(workset))),
-		humanize.Comma(int64(followers.Len())),
+		humanize.Comma(w.worktodo),
+		humanize.Comma(w.followers),
 		humanize.Comma(curInflight),
 		humanize.Comma(w.totalkeys),
 		humanize.Bytes(w.totalsize),
