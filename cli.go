@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"fmt"
+	"github.com/Shopify/brigade/cmd/diff"
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/cmd/slice"
 	"github.com/Shopify/brigade/cmd/sync"
@@ -23,34 +24,35 @@ func newApp(auth aws.Auth) *cli.App {
 	app.Usage = "Toolkit to list and sync S3 buckets."
 	app.Version = fmt.Sprintf("0.0.1 (%s, %s)", branch, commit)
 
-	listflag, listaction := listCommand(auth)
-	syncflag, syncaction := syncCommand(auth)
-	sliceflag, sliceaction := sliceCommand()
+	listFlag, listAction := listCommand(auth)
+	syncFlag, syncAction := syncCommand(auth)
+	sliceFlag, sliceAction := sliceCommand()
+	diffFlag, diffAction := diffCommand()
 
 	app.Commands = []cli.Command{
 		cli.Command{
 			Name:  "list",
-			Usage: "Lists the keys in an S3 bucket",
+			Usage: "Lists the keys in an S3 bucket.",
 			Description: strings.TrimSpace(`
 Do a traversal of the S3 bucket using many concurrent workers. The result of
 traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
-			Flags:  listflag,
-			Action: listaction,
+			Flags:  listFlag,
+			Action: listAction,
 		},
 
 		cli.Command{
 			Name:  "sync",
-			Usage: "Syncs the keys from a source S3 bucket to another",
+			Usage: "Syncs the keys from a source S3 bucket to another.",
 			Description: strings.TrimSpace(`
 Reads the keys from an s3 key listing and sync them one by one from a source
 bucket to a destination bucket.`),
-			Flags:  syncflag,
-			Action: syncaction,
+			Flags:  syncFlag,
+			Action: syncAction,
 		},
 
 		cli.Command{
 			Name:  "slice",
-			Usage: "Slice an S3 key listing into multiple sub-listings",
+			Usage: "Slice an S3 key listing into multiple sub-listings.",
 			Description: strings.TrimSpace(`
 Slices a listing of S3 keys into multiple files, each containing evenly
 distributed keys. It expects a key listing in the form of a gzip'd JSON file
@@ -61,8 +63,18 @@ Will produce the files:
 	0_bucket.json.gz
 	1_bucket.json.gz
 	2_bucket.json.gz`),
-			Flags:  sliceflag,
-			Action: sliceaction,
+			Flags:  sliceFlag,
+			Action: sliceAction,
+		},
+
+		cli.Command{
+			Name:  "diff",
+			Usage: "Generates a differential listing of S3 keys.",
+			Description: strings.TrimSpace(`
+Reads from an old s3 key listing and a new one, computes which keys have changed
+in the new listing and generates a new files containing only those keys.`),
+			Flags:  diffFlag,
+			Action: diffAction,
 		},
 	}
 
@@ -243,4 +255,69 @@ func sliceCommand() ([]cli.Flag, func(*cli.Context)) {
 	}
 
 	return []cli.Flag{nFlag, filenameFlag}, action
+}
+
+func diffCommand() ([]cli.Flag, func(*cli.Context)) {
+	var (
+		oldfileFlag = cli.StringFlag{Name: "old", Usage: "old file from which to read s3 keys"}
+		newfileFlag = cli.StringFlag{Name: "new", Usage: "new file from which to read s3 keys"}
+		dstfileFlag = cli.StringFlag{Name: "dst", Usage: "destination file where to write the keys that have changed"}
+	)
+
+	action := func(c *cli.Context) {
+
+		var (
+			oldfile = c.String(oldfileFlag.Name)
+			newfile = c.String(newfileFlag.Name)
+			dstfile = c.String(dstfileFlag.Name)
+		)
+
+		switch {
+		case oldfile == "":
+			elog.Print("need a filename for old key listing")
+		case newfile == "":
+			elog.Print("need a filename for new key listing")
+		case dstfile == "":
+			elog.Print("need a filename for dst key listing")
+		}
+
+		open := func(filename string) *os.File {
+			f, err := os.Open(filename)
+			if err != nil {
+				elog.Fatalf("couldn't open file %q: %v", filename, err)
+			}
+			return f
+		}
+
+		newf := open(newfile)
+		defer func() { lognotnil(newf.Close()) }()
+		oldf := open(oldfile)
+		defer func() { lognotnil(oldf.Close()) }()
+
+		dstf, err := os.Create(dstfile)
+		if err != nil {
+			elog.Fatalf("couldn't create destination file %q: %v", dstfile, err)
+			return
+		}
+		defer func() { lognotnil(dstf.Close()) }()
+
+		gzread := func(f *os.File) *gzip.Reader {
+			gzr, err := gzip.NewReader(f)
+			if err != nil {
+				elog.Fatalf("couldn't read gzip from %q: %v", f.Name(), err)
+			}
+			return gzr
+		}
+
+		newgz := gzread(newf)
+		oldgz := gzread(oldf)
+		dstgz := gzip.NewWriter(dstf)
+		defer func() { lognotnil(dstgz.Close()) }()
+
+		if err := diff.Diff(elog, oldgz, newgz, dstgz); err != nil {
+			elog.Printf("failed to diff: %v", err)
+		}
+	}
+
+	return []cli.Flag{oldfileFlag, newfileFlag, dstfileFlag}, action
 }
