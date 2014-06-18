@@ -1,0 +1,46 @@
+{
+	"ImportPath": "github.com/Shopify/brigade",
+	"GoVersion": "go1.3rc1",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/aybabtme/color",
+			"Rev": "0db0bdb3cc7ff8ddff622052366e17f0d506b0ef"
+		},
+		{
+			"ImportPath": "github.com/bmizerany/perks/quantile",
+			"Rev": "6cb9d9d729303ee2628580d9aec5db968da3a607"
+		},
+		{
+			"ImportPath": "github.com/bradfitz/iter",
+			"Rev": "454541ec3da2a73fc34fd049b19ee5777bf19345"
+		},
+		{
+			"ImportPath": "github.com/cheggaaa/pb",
+			"Rev": "a4339a42dc7ac74793debe4c726fcb47ec39bcc3"
+		},
+		{
+			"ImportPath": "github.com/codegangsta/cli",
+			"Comment": "1.0.0-65-g820deef",
+			"Rev": "820deefc9031d101f085ef773425fc6ca7a5363e"
+		},
+		{
+			"ImportPath": "github.com/crowdmob/goamz/aws",
+			"Rev": "09e68060fa9a495564d8e1c56191034c3d4f1c2b"
+		},
+		{
+			"ImportPath": "github.com/crowdmob/goamz/s3",
+			"Rev": "09e68060fa9a495564d8e1c56191034c3d4f1c2b"
+		},
+		{
+			"ImportPath": "github.com/dustin/go-humanize",
+			"Rev": "3cd90eb3d932037b141d4daff9a012e1aee7e765"
+		},
+		{
+			"ImportPath": "github.com/dustin/randbo",
+			"Rev": "7f1b564ca7242d22bcc6e2128beb90d9fa38b9f0"
+		}
+	]
+}
