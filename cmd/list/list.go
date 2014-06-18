@@ -1,4 +1,4 @@
-// Command brigade-s3-sync walks an S3 bucket and saves all the keys in
+// Package list walks an S3 bucket and saves all the keys in
 // the bucket. The file will contain one key in JSON form per line, and
 // will be compressed with gzip.
 //
@@ -34,30 +34,23 @@
 // references to keys. Those duplicates are rare (<1000 over 40 millions).
 // If we accept that duplicates occur, we can save a lot of memory by
 // avoiding to track the set of visited edges (>40millions such edges).
-package main
+package list
 
 import (
-	"compress/gzip"
 	"encoding/json"
-	"flag"
-	"github.com/aybabtme/color/brush"
-	"github.com/crowdmob/goamz/aws"
+	"fmt"
 	"github.com/crowdmob/goamz/s3"
-	"github.com/davecheney/profile"
 	"github.com/dustin/go-humanize"
 	"io"
 	"log"
 	"math"
 	"net/url"
-	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
-	"text/tabwriter"
 	"time"
 )
 
-const (
+var (
 	// MaxList is the maximum number of keys to accept from a call to LIST an s3
 	// prefix.
 	MaxList = 10000
@@ -68,76 +61,30 @@ const (
 
 	// MaxRetry is the number of time a worker will retry a LIST on a path,
 	// given that the error was retryable.
-	MaxRetry = 5
+	MaxRetry  = 5
+	InitRetry = time.Second * 2
 )
 
 var (
-	root = mustURL("/")
 	elog *log.Logger
+	root = func(path string) *url.URL {
+		u, err := url.Parse(path)
+		if err != nil {
+			log.Panicf("%q must be a valid URL: %v", path, err)
+		}
+		return u
+	}("/")
 )
 
-func init() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
+// List an s3 bucket and write the keys in JSON form to dst. If dedup, will
+// deduplicate all keys using a set (consumes more memory).
+func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) error {
 
-	w := tabwriter.NewWriter(os.Stdout, 16, 2, 2, ' ', 0)
-	log.SetOutput(&lineTabWriter{w})
-	log.SetFlags(log.Ltime)
-	log.SetPrefix(brush.Blue("[info] ").String())
-
-}
-
-func main() {
-
-	// setup the error log to write on stderr and to a file
-	efile, err := os.OpenFile(os.Args[0]+".elog", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-	if err != nil {
-		log.Fatal(err)
+	elog = el
+	srcU, srcErr := url.Parse(src)
+	if srcErr != nil {
+		return fmt.Errorf("not a valid bucket URL: %v", srcErr)
 	}
-	defer func() { lognotnil(efile.Close()) }()
-	elog = log.New(io.MultiWriter(os.Stderr, efile), brush.Red("[error] ").String(), log.Ltime|log.Lshortfile)
-
-	// read the flags
-	var (
-		access      = os.Getenv("AWS_ACCESS_KEY")
-		secret      = os.Getenv("AWS_SECRET_KEY")
-		src         = flag.String("bkt", "", "path to bucket, of the form s3://name/path/")
-		dst         = flag.String("dst", "bucket_list.json.gz", "filename to which the list of keys is saved")
-		memprof     = flag.Bool("memprof", false, "track a memory profile")
-		deduplicate = flag.Bool("deduplicate", false, "deduplicate jobs and keys, consumes much more memory")
-		regionName  = flag.String("aws-region", aws.USEast.Name, "AWS region")
-	)
-	flag.Parse()
-
-	srcU, srcErr := url.Parse(*src)
-	region, validRegion := aws.Regions[*regionName]
-	switch {
-	case access == "":
-		flagFatal("needs an AWS access key\n")
-	case secret == "":
-		flagFatal("needs an AWS secret key\n")
-	case *src == "":
-		flagFatal("needs a source bucket\n")
-	case srcErr != nil:
-		flagFatal("%q is not a valid source URL: %v", *src, srcErr)
-	case !validRegion:
-		flagFatal("%q is not a valid region name", *regionName)
-	}
-
-	auth := aws.Auth{AccessKey: access, SecretKey: secret}
-	sss := s3.New(auth, region)
-
-	if *memprof {
-		defer profile.Start(profile.MemProfile).Stop()
-	}
-
-	// create the output file for the bucket keys
-	file, err := os.Create(*dst)
-	if err != nil {
-		elog.Fatalf("couldn't open %q: %v", *dst, err)
-	}
-	defer func() { lognotnil(file.Close()) }()
-	gw := gzip.NewWriter(file)
-	defer func() { lognotnil(gw.Close()) }()
 
 	keys := make(chan s3.Key, Concurrency)
 
@@ -151,18 +98,18 @@ func main() {
 				elog.Fatalf("Couldn't encode key %q: %v", k.Key, err)
 			}
 		}
-	}(gw)
+	}(dst)
 
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
-	err = listAllKeys(sss, srcU, *deduplicate, func(k s3.Key) { keys <- k })
+	err := listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
 	close(keys)
 	<-encDone
-
 	if err != nil {
-		elog.Fatalf("Couldn't list buckets: %v", err)
+		return fmt.Errorf("couldn't list bucket: %v", err)
 	}
+	return nil
 }
 
 func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error {
@@ -188,9 +135,7 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
-	// FIFO will do a BFS
-	// followers := &fifoJobs{}
-	// LIFO will do a DFS
+	// LIFO will do a DF traversal
 	followers := &lifoJobs{}
 	visited := make(map[string]struct{})
 	workSet := make(jobSet)
@@ -247,6 +192,7 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 				elog.Printf("job=%d\tretrying\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 				doneJob.err = nil
 				followers.Add(doneJob)
+				workSet.Add(doneJob)
 			} else {
 				elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 			}
@@ -349,8 +295,8 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 			// that is overloaded, and various network issues.
 			attempsSoFar := float64(MaxRetry - job.retryLeft + 1)
 			backoff := math.Pow(2.0, attempsSoFar)
-			sleepFor := time.Duration(backoff) * time.Second
-			elog.Printf("worker-sleep-on-error=%v", sleepFor)
+			sleepFor := time.Duration(backoff) * InitRetry
+			elog.Printf("worker-sleep-on-error=%v\tbackoff=%v", sleepFor, backoff)
 			time.Sleep(sleepFor)
 			elog.Printf("worker-woke-up")
 		} else {

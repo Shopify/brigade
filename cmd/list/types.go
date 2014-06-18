@@ -1,4 +1,4 @@
-package main
+package list
 
 import (
 	"github.com/bmizerany/perks/quantile"
@@ -23,22 +23,9 @@ type jobsColl interface {
 }
 
 var (
-	// Compile checks
-	_ jobsColl = &fifoJobs{}
+	// Compile check
 	_ jobsColl = &lifoJobs{}
 )
-
-type fifoJobs struct{ queue []*Job }
-
-func (f *fifoJobs) IsEmpty() bool { return len(f.queue) == 0 }
-func (f *fifoJobs) Len() int      { return len(f.queue) }
-func (f *fifoJobs) Add(job *Job)  { f.queue = append(f.queue, job) }
-func (f *fifoJobs) Peek() *Job    { return f.queue[0] }
-func (f *fifoJobs) Remove() *Job {
-	item := f.queue[0]
-	f.queue = f.queue[1:]
-	return item
-}
 
 type lifoJobs struct{ stack []*Job }
 
