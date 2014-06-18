@@ -247,7 +247,7 @@ func sliceCommand() ([]cli.Flag, func(*cli.Context)) {
 			return
 		}
 
-		err := slice.Slice(elog, filename, n)
+		_, err := slice.Slice(elog, filename, n)
 		if err != nil {
 			elog.Printf("failed to slice: %v", err)
 		}

@@ -19,8 +19,18 @@ var (
 )
 
 // Slice creates n subparts from the gzip'd JSON file at `filename`.
-func Slice(el *log.Logger, filename string, n int) (err error) {
+func Slice(el *log.Logger, filename string, n int) (filenames []string, err error) {
 	elog = el
+
+	// capture errors thrown by `must` helpers
+	defer func() {
+		r := recover()
+		if rerr, ok := r.(error); ok {
+			err = rerr
+		} else if r != nil {
+			panic(r)
+		}
+	}()
 
 	inputfile, size := mustOpen(filename)
 	defer func() { err = inputfile.Close() }()
@@ -30,6 +40,8 @@ func Slice(el *log.Logger, filename string, n int) (err error) {
 	outputs := make([]io.Writer, n)
 	for i := range iter.N(n) {
 		outfilename := fmt.Sprintf("%d_%s", i, basename)
+		filenames = append(filenames, outfilename)
+
 		outf := mustCreate(outfilename)
 		outbuf := bufio.NewWriter(outf)
 		gzw := gzip.NewWriter(outbuf)
@@ -37,7 +49,7 @@ func Slice(el *log.Logger, filename string, n int) (err error) {
 		log.Printf("\toutput file %d: %q", i, outfilename)
 		defer func(filename string) {
 			if err := gzw.Close(); err != nil {
-				elog.Printf("closing GZIP stream for file %q", outfilename)
+				elog.Printf("closing gzip stream for file %q", outfilename)
 			}
 
 			if err := outbuf.Flush(); err != nil {
@@ -63,7 +75,7 @@ func Slice(el *log.Logger, filename string, n int) (err error) {
 	<-doneWrite
 	log.Printf("done writing to outputs in %v", time.Since(start))
 
-	return nil
+	return filenames, nil
 }
 
 func multiplexLines(lines <-chan []byte, outputs []io.Writer, done chan<- struct{}) {
@@ -120,12 +132,12 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 func mustOpen(filename string) (*os.File, int64) {
 	file, err := os.Open(filename)
 	if err != nil {
-		elog.Fatalf("couldn't open file %q: %v", filename, err)
+		elog.Panicf("couldn't open file %q: %v", filename, err)
 	}
 	fi, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		elog.Fatalf("couldn't stat file %q: %v", filename, err)
+		elog.Panicf("couldn't stat file %q: %v", filename, err)
 	}
 	return file, fi.Size()
 }
@@ -133,7 +145,7 @@ func mustOpen(filename string) (*os.File, int64) {
 func mustCreate(filename string) *os.File {
 	file, err := os.Create(filename)
 	if err != nil {
-		elog.Fatalf("couldn't create file %q: %v", filename, err)
+		elog.Panicf("couldn't create file %q: %v", filename, err)
 	}
 	return file
 }
