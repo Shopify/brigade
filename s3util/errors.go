@@ -24,7 +24,7 @@ const (
 	ErrIncorrectNumberOfFilesInPostRequest     = "IncorrectNumberOfFilesInPostRequest"
 	ErrInlineDataTooLarge                      = "InlineDataTooLarge"
 	ErrInternalError                           = "InternalError"
-	ErrInvalidAccessKeyId                      = "InvalidAccessKeyId"
+	ErrInvalidAccessKeyID                      = "InvalidAccessKeyID"
 	ErrInvalidAddressingHeader                 = "InvalidAddressingHeader"
 	ErrInvalidArgument                         = "InvalidArgument"
 	ErrInvalidBucketName                       = "InvalidBucketName"
