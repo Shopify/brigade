@@ -330,7 +330,7 @@ func shouldAbort(err error) bool {
 	case s3util.IsS3Error(err, s3util.ErrAccessDenied):
 	case s3util.IsS3Error(err, s3util.ErrAccountProblem):
 	case s3util.IsS3Error(err, s3util.ErrCredentialsNotSupported):
-	case s3util.IsS3Error(err, s3util.ErrInvalidAccessKeyId):
+	case s3util.IsS3Error(err, s3util.ErrInvalidAccessKeyID):
 	case s3util.IsS3Error(err, s3util.ErrInvalidBucketName):
 	case s3util.IsS3Error(err, s3util.ErrNoSuchBucket):
 	}
