@@ -10,6 +10,10 @@
 			"Rev": "0db0bdb3cc7ff8ddff622052366e17f0d506b0ef"
 		},
 		{
+			"ImportPath": "github.com/aybabtme/uniplot/spark",
+			"Rev": "2658edae5ff45550d608376464a249bdd7500414"
+		},
+		{
 			"ImportPath": "github.com/bmizerany/perks/quantile",
 			"Rev": "6cb9d9d729303ee2628580d9aec5db968da3a607"
 		},
@@ -41,6 +45,19 @@
 		{
 			"ImportPath": "github.com/dustin/randbo",
 			"Rev": "7f1b564ca7242d22bcc6e2128beb90d9fa38b9f0"
+		},
+		{
+			"ImportPath": "github.com/kr/pretty",
+			"Comment": "go.weekly.2011-12-22-18-gbc9499c",
+			"Rev": "bc9499caa0f45ee5edb2f0209fbd61fbf3d9018f"
+		},
+		{
+			"ImportPath": "github.com/kr/text",
+			"Rev": "6807e777504f54ad073ecef66747de158294b639"
+		},
+		{
+			"ImportPath": "github.com/olekukonko/ts",
+			"Rev": "ecf753e7c962639ab5a1fb46f7da627d4c0a04b8"
 		}
 	]
 }
