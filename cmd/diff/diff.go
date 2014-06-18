@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/aybabtme/uniplot/spark"
 	"github.com/bradfitz/iter"
 	"github.com/crowdmob/goamz/s3"
+	"github.com/dustin/go-humanize"
 	"io"
 	"log"
 	"runtime"
@@ -27,10 +29,12 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 	start := time.Now()
 	log.Printf("computing difference in keys")
 	diff, err := computeDifference(oldList, newList)
-	if err != nil {
-		return fmt.Errorf("computing source difference, %v", err)
+	if err != nil && len(diff) == 0 {
+		return fmt.Errorf("computing source difference, produced no diff, %v", err)
+	} else if err != nil {
+		elog.Printf("an error occured computing difference: %v", err)
 	}
-	log.Printf("done computing difference in %v: %d keys differ", time.Since(start), len(diff))
+	log.Printf("done computing difference in %v: %s keys differ", time.Since(start), humanize.Comma(int64(len(diff))))
 
 	if err := writeDiff(output, diff); err != nil {
 		return fmt.Errorf("writing difference to output, %v", err)
@@ -45,13 +49,13 @@ func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading first source, %v", err)
 	}
-	log.Printf("old list contains %d keys", keyset.Len())
+	log.Printf("old list contains %s keys", humanize.Comma(int64(keyset.Len())))
 
 	diff, listlen, err := readNewList(newList, keyset)
+	log.Printf("new list contains %s keys", humanize.Comma(int64(listlen)))
 	if err != nil {
-		return nil, fmt.Errorf("reading second source, %v", err)
+		return diff, fmt.Errorf("reading second source, %v", err)
 	}
-	log.Printf("new list contains %d keys", listlen)
 	return diff, nil
 }
 
@@ -62,11 +66,16 @@ func readOldList(src io.Reader) (keySet, error) {
 
 	doneSrcA := make(chan struct{})
 	go func() {
+		sprk := spark.Spark(time.Millisecond * 60)
 		defer close(doneSrcA)
+		sprk.Start()
+		sprk.Units = "keys"
 		for key := range keys {
 			// stores the etag, which will differ if files have changed
 			keyset.Add(key.ETag)
+			sprk.Add(1.0)
 		}
+		sprk.Stop()
 	}()
 
 	wg := sync.WaitGroup{}
@@ -95,14 +104,19 @@ func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 
 	doneDiffing := make(chan struct{})
 	go func() {
+		sprk := spark.Spark(time.Millisecond * 60)
 		defer close(doneDiffing)
+		sprk.Start()
+		sprk.Units = "keys"
 		for key := range keys {
 			newKeys++
+			sprk.Add(1.0)
 			// only add ETags that aren't known from the old list
 			if !keyset.Contains(key.ETag) {
 				diffKeys = append(diffKeys, key)
 			}
 		}
+		sprk.Stop()
 	}()
 
 	wg := sync.WaitGroup{}
@@ -112,7 +126,7 @@ func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 	}
 
 	if err := readLines(src, decoders); err != nil {
-		return nil, newKeys, err
+		return diffKeys, newKeys, err
 	}
 	wg.Wait()
 	close(keys)
