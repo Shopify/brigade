@@ -27,13 +27,13 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 	elog = el
 
 	start := time.Now()
+
 	log.Printf("computing difference in keys")
 	diff, differr := computeDifference(oldList, newList)
 	if differr != nil && len(diff) == 0 {
 		return fmt.Errorf("computing source difference, produced no diff, %v", differr)
-	} else if differr != nil {
-		elog.Printf("an error occured computing difference: %v", differr)
 	}
+
 	log.Printf("done computing difference in %v: %s keys differ", time.Since(start), humanize.Comma(int64(len(diff))))
 
 	writeerr := writeDiff(output, diff)
@@ -54,6 +54,7 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 
 func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
+	log.Printf("reading old key list...")
 	keyset, olderr := readOldList(oldList)
 	switch olderr {
 	case io.ErrUnexpectedEOF:
@@ -68,6 +69,7 @@ func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
 	log.Printf("old list contains %s keys", humanize.Comma(int64(keyset.Len())))
 
+	log.Printf("reading new key list...")
 	diff, listlen, newerr := readNewList(newList, keyset)
 	switch newerr {
 	case io.ErrUnexpectedEOF:
@@ -148,9 +150,9 @@ func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 		sprk.Units = "keys"
 		for key := range keys {
 			newKeys++
+			sprk.Add(1.0)
 			// only add ETags that aren't known from the old list
 			if !keyset.Contains(key.ETag) {
-				sprk.Add(1.0)
 				diffKeys = append(diffKeys, key)
 			}
 		}
