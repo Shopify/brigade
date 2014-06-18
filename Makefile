@@ -1,7 +1,11 @@
 # SSHKEY=""
 # DEPLOY_HOST="deploy@brigade.ec2.shopify.com"
 SSHKEY=-i $(HOME)/key/antoine-gonan-dev.pem
-DEPLOY_HOST=ubuntu@ec2-54-227-68-25.compute-1.amazonaws.com
+DEPLOY_HOST=
+
+BRANCH=`git rev-parse --abbrev-ref HEAD`
+COMMIT=`git rev-parse --short HEAD`
+GOLDFLAGS="-X main.branch $(BRANCH) -X main.commit $(COMMIT)"
 
 setup:
 	@go get -u github.com/tools/godep
@@ -15,24 +19,29 @@ cloc:
 # go get github.com/kisielk/errcheck
 errcheck:
 	@echo "=== errcheck ==="
-	@errcheck cmd/...
+	@errcheck ./...
 
 vet:
 	@echo "==== go vet ==="
-	@go vet cmd/...
+	@go vet ./...
 
 # go get github.com/golang/lint/golint
 lint:
 	@echo "==== go lint ==="
-	@golint ./cmd/**/*.go
+	@golint ./**/*.go
 
 fmt:
 	@go fmt ./...
 
+build:
+	@godep go build -ldflags=$(GOLDFLAGS) -o brigade
 
-deploy: fmt vet lint errcheck
+test: fmt errcheck vet lint
+	@godep go test ./...
+
+deploy: test
 	# Compile
-	GOARCH=amd64 GOOS=linux godep go build -o brigade-s3-list ./cmd/brigade-s3-list/
+	GOARCH=amd64 GOOS=linux godep go build -ldflags=$(GOLDFLAGS) -o brigade
 	#GOARCH=amd64 GOOS=linux godep go build -o brigade-s3-diff ./cmd/brigade-s3-diff/
 	#GOARCH=amd64 GOOS=linux godep go build -o brigade-s3-sync ./cmd/brigade-s3-sync/
 
@@ -52,4 +61,4 @@ deploy: fmt vet lint errcheck
 	#@scp $(SSHKEY) ./cmd/brigade-s3-sync/run_sync.sh $(DEPLOY_HOST):~/
 
 
-.PHONY: cloc lint fmt test deploy
+.PHONY: setup cloc errcheck vet lint fmt build test deploy
