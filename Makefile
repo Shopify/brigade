@@ -7,6 +7,8 @@ BRANCH=`git rev-parse --abbrev-ref HEAD`
 COMMIT=`git rev-parse --short HEAD`
 GOLDFLAGS="-X main.branch $(BRANCH) -X main.commit $(COMMIT)"
 
+all: test build
+
 setup:
 	@go get -u github.com/tools/godep
 	@go get -u github.com/golang/lint/golint
