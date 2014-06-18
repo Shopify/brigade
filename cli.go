@@ -272,6 +272,7 @@ func diffCommand() ([]cli.Flag, func(*cli.Context)) {
 			dstfile = c.String(dstfileFlag.Name)
 		)
 
+		hadError := true
 		switch {
 		case oldfile == "":
 			elog.Print("need a filename for old key listing")
@@ -279,6 +280,12 @@ func diffCommand() ([]cli.Flag, func(*cli.Context)) {
 			elog.Print("need a filename for new key listing")
 		case dstfile == "":
 			elog.Print("need a filename for dst key listing")
+		default:
+			hadError = false
+		}
+		if hadError {
+			cli.ShowCommandHelp(c, c.Command.Name)
+			return
 		}
 
 		open := func(filename string) *os.File {
