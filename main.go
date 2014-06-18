@@ -47,12 +47,12 @@ func main() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, CatchSignals...)
 		for {
-			log.Printf("received signal %v: send another signal within %v to terminate", <-c, SignalTimeout)
+			elog.Printf("received signal %v: send another signal within %v to terminate", <-c, SignalTimeout)
 			select {
 			case <-time.After(SignalTimeout):
-				log.Printf("no signal received: continuing")
+				elog.Printf("no signal received: continuing")
 			case s := <-c:
-				log.Fatalf("received signal %v: terminating", s)
+				elog.Fatalf("received signal %v: terminating", s)
 			}
 		}
 	}()
