@@ -31,12 +31,19 @@ lint:
 	@golint ./**/*.go
 
 fmt:
+	@echo "=== go fmt ==="
 	@go fmt ./...
 
+install: test
+	@echo "=== go install ==="
+	@godep go install -ldflags=$(GOLDFLAGS)
+
 build:
+	@echo "=== go build ==="
 	@godep go build -ldflags=$(GOLDFLAGS) -o brigade
 
-test: fmt errcheck vet lint
+test: fmt vet lint errcheck
+	@echo "=== go test ==="
 	@godep go test ./...
 
 deploy: test
@@ -61,4 +68,4 @@ deploy: test
 	#@scp $(SSHKEY) ./cmd/brigade-s3-sync/run_sync.sh $(DEPLOY_HOST):~/
 
 
-.PHONY: setup cloc errcheck vet lint fmt build test deploy
+.PHONY: setup cloc errcheck vet lint fmt install build test deploy
