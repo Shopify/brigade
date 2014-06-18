@@ -28,35 +28,70 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 
 	start := time.Now()
 	log.Printf("computing difference in keys")
-	diff, err := computeDifference(oldList, newList)
-	if err != nil && len(diff) == 0 {
-		return fmt.Errorf("computing source difference, produced no diff, %v", err)
-	} else if err != nil {
-		elog.Printf("an error occured computing difference: %v", err)
+	diff, differr := computeDifference(oldList, newList)
+	if differr != nil && len(diff) == 0 {
+		return fmt.Errorf("computing source difference, produced no diff, %v", differr)
+	} else if differr != nil {
+		elog.Printf("an error occured computing difference: %v", differr)
 	}
 	log.Printf("done computing difference in %v: %s keys differ", time.Since(start), humanize.Comma(int64(len(diff))))
 
-	if err := writeDiff(output, diff); err != nil {
-		return fmt.Errorf("writing difference to output, %v", err)
-	}
+	writeerr := writeDiff(output, diff)
+
 	log.Printf("done writing difference in %v", time.Since(start))
-	return nil
+
+	switch {
+	case differr != nil && writeerr != nil:
+		return fmt.Errorf("diffing sources, %v; writing diff, %v", differr, writeerr)
+	case differr != nil:
+		return fmt.Errorf("reading diff sources (could still write partial diff), %v", differr)
+	case writeerr != nil:
+		return fmt.Errorf("writing diff, %v", writeerr)
+	default:
+		return nil
+	}
 }
 
 func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
-	keyset, err := readOldList(oldList)
-	if err != nil {
-		return nil, fmt.Errorf("reading first source, %v", err)
+	keyset, olderr := readOldList(oldList)
+	switch olderr {
+	case io.ErrUnexpectedEOF:
+		elog.Printf("reading old source: %v", olderr)
+		// continue
+	case nil:
+		// continue
+	default:
+		// not nil, not UnexpectedEOF; bail
+		return nil, fmt.Errorf("reading old source, %v", olderr)
 	}
+
 	log.Printf("old list contains %s keys", humanize.Comma(int64(keyset.Len())))
 
-	diff, listlen, err := readNewList(newList, keyset)
-	log.Printf("new list contains %s keys", humanize.Comma(int64(listlen)))
-	if err != nil {
-		return diff, fmt.Errorf("reading second source, %v", err)
+	diff, listlen, newerr := readNewList(newList, keyset)
+	switch newerr {
+	case io.ErrUnexpectedEOF:
+		elog.Printf("reading new source: %v", newerr)
+		// continue
+	case nil:
+		// continue
+	default:
+		// not nil, not UnexpectedEOF; bail
+		return nil, fmt.Errorf("reading first source, %v", newerr)
 	}
-	return diff, nil
+
+	log.Printf("new list contains %s keys", humanize.Comma(int64(listlen)))
+
+	switch {
+	case olderr != nil && newerr != nil:
+		return diff, fmt.Errorf("reading both source, %v", olderr)
+	case olderr != nil:
+		return diff, fmt.Errorf("reading old source, %v", olderr)
+	case newerr != nil:
+		return diff, fmt.Errorf("reading new source, %v", newerr)
+	default:
+		return diff, nil
+	}
 }
 
 func readOldList(src io.Reader) (keySet, error) {
@@ -85,7 +120,10 @@ func readOldList(src io.Reader) (keySet, error) {
 	}
 
 	if err := readLines(src, decoders); err != nil {
-		return nil, err
+		wg.Wait()
+		close(keys)
+		<-doneSrcA
+		return keyset, err
 	}
 	wg.Wait()
 	close(keys)
@@ -110,9 +148,9 @@ func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 		sprk.Units = "keys"
 		for key := range keys {
 			newKeys++
-			sprk.Add(1.0)
 			// only add ETags that aren't known from the old list
 			if !keyset.Contains(key.ETag) {
+				sprk.Add(1.0)
 				diffKeys = append(diffKeys, key)
 			}
 		}
@@ -126,8 +164,12 @@ func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 	}
 
 	if err := readLines(src, decoders); err != nil {
+		wg.Wait()
+		close(keys)
+		<-doneDiffing
 		return diffKeys, newKeys, err
 	}
+
 	wg.Wait()
 	close(keys)
 	<-doneDiffing
