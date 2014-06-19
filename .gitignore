@@ -1,2 +1,5 @@
 config/*
-
+testdata/*
+*.json.gz
+*.elog
+brigade
