@@ -10,6 +10,8 @@ GOLDFLAGS="-X main.branch $(BRANCH) -X main.commit $(COMMIT)"
 all: test build
 
 setup:
+	@go get -u code.google.com/p/go.tools/cmd/vet
+	@go get -u code.google.com/p/go.tools/cmd/cover
 	@go get -u github.com/tools/godep
 	@go get -u github.com/golang/lint/golint
 	@go get -u github.com/kisielk/errcheck
@@ -18,7 +20,6 @@ setup:
 cloc:
 	@cloc --sdir='Godeps' --not-match-f='Makefile|_test.go' .
 
-# go get github.com/kisielk/errcheck
 errcheck:
 	@echo "=== errcheck ==="
 	@errcheck ./...
@@ -27,7 +28,6 @@ vet:
 	@echo "==== go vet ==="
 	@go vet ./...
 
-# go get github.com/golang/lint/golint
 lint:
 	@echo "==== go lint ==="
 	@golint ./**/*.go
