@@ -3,13 +3,13 @@ package sync
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"github.com/Shopify/brigade/s3util"
+	"github.com/aybabtme/goamz/s3"
 	"github.com/bmizerany/perks/quantile"
-	"github.com/crowdmob/goamz/s3"
 	"github.com/dustin/go-humanize"
 	"io"
 	"log"
-	"net/url"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -43,6 +43,8 @@ var method = map[string]func(*s3.Bucket, *s3.Bucket, s3.Key) error{
 
 // Options for bucket syncing.
 type Options struct {
+	RetryBase time.Duration
+
 	MaxRetry   int
 	DecodePara int
 	SyncPara   int
@@ -51,7 +53,7 @@ type Options struct {
 }
 
 func (o *Options) setDefaults() {
-	if o.MaxRetry < 0 {
+	if o.MaxRetry <= 0 {
 		o.MaxRetry = 5
 	}
 	if o.DecodePara <= 0 {
@@ -60,16 +62,25 @@ func (o *Options) setDefaults() {
 	if o.SyncPara <= 0 {
 		o.DecodePara = 200
 	}
+	if o.RetryBase == time.Duration(0) {
+		o.RetryBase = time.Second
+	}
 }
 
 // Sync creates and starts a sync task, reading all the keys that need to be sync'd
 // from the input reader, in JSON form, copying the keys in src onto dst.
-func Sync(el *log.Logger, input io.Reader, sss *s3.S3, src, dst *url.URL, opts Options) {
+func Sync(el *log.Logger, input io.Reader, src, dst *s3.Bucket, opts Options) error {
 	elog = el
 	opts.setDefaults()
 
+	// before starting the sync, make sure our s3 object is usable (credentials and such)
+	_, err := dst.List("/", "/", "/", 1)
+	if err != nil {
+		// if we can't list, we abort right away
+		return fmt.Errorf("couldn't list destination bucket %q: %v", dst.Name, err)
+	}
+
 	task := syncTask{
-		sss:      sss,
 		src:      src,
 		dst:      dst,
 		qtstream: quantile.NewTargeted(targetP50, targetP95),
@@ -82,13 +93,12 @@ func Sync(el *log.Logger, input io.Reader, sss *s3.S3, src, dst *url.URL, opts O
 		task.syncMethod = method[PutCopy]
 	}
 
-	task.Start(input)
+	return task.Start(input)
 }
 
 type syncTask struct {
-	sss *s3.S3
-	src *url.URL
-	dst *url.URL
+	src *s3.Bucket
+	dst *s3.Bucket
 
 	qtstreamL sync.Mutex
 	qtstream  *quantile.Stream
@@ -104,7 +114,7 @@ type syncTask struct {
 	inflight    int64
 }
 
-func (s *syncTask) Start(input io.Reader) {
+func (s *syncTask) Start(input io.Reader) error {
 	start := time.Now()
 
 	ticker := time.NewTicker(time.Second)
@@ -126,12 +136,12 @@ func (s *syncTask) Start(input io.Reader) {
 	syncGroup := sync.WaitGroup{}
 	for i := 0; i < s.opts.SyncPara; i++ {
 		syncGroup.Add(1)
-		go s.syncKey(&syncGroup, s.sss, s.src, s.dst, keys)
+		go s.syncKey(&syncGroup, s.src, s.dst, keys)
 	}
 
 	// feed the pipeline by reading the listing file
 	log.Printf("starting to read key listing file")
-	s.readLines(input, decoders)
+	err := s.readLines(input, decoders)
 
 	// when done reading the source file, wait until the decoders
 	// are done.
@@ -154,6 +164,8 @@ func (s *syncTask) Start(input io.Reader) {
 	log.Printf("done syncing %s keys in %v",
 		humanize.Comma(atomic.LoadInt64(&s.syncedKeys)),
 		time.Since(start))
+
+	return err
 }
 
 // prints progress and stats as we go, handy to figure out what's going on
@@ -177,7 +189,7 @@ func (s *syncTask) printProgress(tick *time.Ticker) {
 }
 
 // reads all the \n separated lines from a file
-func (s *syncTask) readLines(input io.Reader, decoders chan<- []byte) {
+func (s *syncTask) readLines(input io.Reader, decoders chan<- []byte) error {
 
 	rd := bufio.NewReader(input)
 
@@ -185,10 +197,10 @@ func (s *syncTask) readLines(input io.Reader, decoders chan<- []byte) {
 		line, err := rd.ReadBytes('\n')
 		switch err {
 		case io.EOF:
-			return
+			return nil
 		case nil:
 		default:
-			elog.Fatal(err)
+			return err
 		}
 
 		decoders <- line
@@ -211,18 +223,10 @@ func (s *syncTask) decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- s
 	}
 }
 
-func (s *syncTask) syncKey(wg *sync.WaitGroup, sss *s3.S3, src, dst *url.URL, keys <-chan s3.Key) {
+func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan s3.Key) {
 	defer wg.Done()
 
-	srcBkt := sss.Bucket(src.Host)
-	dstBkt := sss.Bucket(dst.Host)
-	// before starting the sync, make sure our s3 object is usable (credentials and such)
-	_, err := dstBkt.List("/", "/", "/", 1)
-	if err != nil {
-		// if we can't list, we abort right away
-		elog.Fatalf("couldn't list destination bucket %q: %v", dst, err)
-	}
-
+	var err error
 	for key := range keys {
 		retry := 1
 	retrying:
@@ -232,7 +236,7 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, sss *s3.S3, src, dst *url.URL, ke
 			// do a put copy call (sync directly from bucket to another
 			// without fetching the content locally)
 			atomic.AddInt64(&s.inflight, 1)
-			err := s.syncMethod(srcBkt, dstBkt, key)
+			err = s.syncMethod(src, dst, key)
 			atomic.AddInt64(&s.inflight, -1)
 			s.qtstreamL.Lock()
 			s.qtstream.Insert(float64(time.Since(start).Nanoseconds()))
@@ -263,7 +267,7 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, sss *s3.S3, src, dst *url.URL, ke
 			// log that we sleep, but don't log the error itself just
 			// yet (to avoid logging transient network errors that are
 			// recovered by retrying)
-			sleepFor := time.Second * time.Duration(retry)
+			sleepFor := s.opts.RetryBase * time.Duration(retry)
 			elog.Printf("worker-sleep-on-retryiable-error=%v", sleepFor)
 			time.Sleep(sleepFor)
 			elog.Printf("worker-wake-up, retries=%d/%d", retry, s.opts.MaxRetry)
