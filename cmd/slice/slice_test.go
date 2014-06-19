@@ -5,7 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/slice"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 	"github.com/kr/pretty"
 	"io"
 	"io/ioutil"

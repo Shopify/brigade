@@ -7,10 +7,10 @@ import (
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/cmd/slice"
 	"github.com/Shopify/brigade/cmd/sync"
+	"github.com/aybabtme/goamz/aws"
+	"github.com/aybabtme/goamz/s3"
 	"github.com/cheggaaa/pb"
 	"github.com/codegangsta/cli"
-	"github.com/crowdmob/goamz/aws"
-	"github.com/crowdmob/goamz/s3"
 	"net/url"
 	"os"
 	"strings"
@@ -214,7 +214,11 @@ func syncCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 			SyncPara: conc,
 		}
 
-		sync.Sync(elog, gr, s3.New(auth, region), srcU, dstU, opts)
+		sss := s3.New(auth, region)
+		srcBkt := sss.Bucket(srcU.Host)
+		dstBkt := sss.Bucket(dstU.Host)
+
+		sync.Sync(elog, gr, srcBkt, dstBkt, opts)
 	}
 
 	return []cli.Flag{filenameFlag, srcFlag, dstFlag, regionFlag, concurrencyFlag}, action

@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/aybabtme/color/brush"
-	"github.com/crowdmob/goamz/aws"
+	"github.com/aybabtme/goamz/aws"
 	"io"
 	"log"
 	"os"

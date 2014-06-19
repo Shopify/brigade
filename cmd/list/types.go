@@ -1,8 +1,8 @@
 package list
 
 import (
+	"github.com/aybabtme/goamz/s3"
 	"github.com/bmizerany/perks/quantile"
-	"github.com/crowdmob/goamz/s3"
 	"github.com/dustin/go-humanize"
 	"log"
 	"path"

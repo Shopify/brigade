@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/s3mock"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 	"io"
 	"io/ioutil"
 	"log"

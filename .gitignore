@@ -1,5 +1,5 @@
 config/*
+testdata/*
 *.json.gz
 *.elog
-cmd/brigade-s3-list/brigade-s3-list
-cmd/brigade-s3-sync/brigade-s3-sync
+brigade

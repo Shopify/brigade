@@ -1,7 +1,7 @@
 package s3util
 
 import (
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 )
 
 // List of all AWS S3 error codes, extracted from:

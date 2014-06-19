@@ -2,9 +2,9 @@ package s3mock
 
 import (
 	"encoding/json"
-	"github.com/crowdmob/goamz/aws"
-	"github.com/crowdmob/goamz/s3"
-	"github.com/crowdmob/goamz/s3/s3test"
+	"github.com/aybabtme/goamz/aws"
+	"github.com/aybabtme/goamz/s3"
+	"github.com/aybabtme/goamz/s3/s3test"
 	"github.com/dustin/randbo"
 	"io"
 	"testing"
@@ -24,6 +24,8 @@ type MockS3 interface {
 	S3() *s3.S3
 	// Seed the mock bucket into this mock S3.
 	Seed(MockBucket) MockS3
+	// ListBuckets gives a snapshot of the buckets on S3.
+	ListBuckets() map[string]s3test.Bucket
 	// Close the mock resources.
 	Close()
 }
@@ -54,6 +56,10 @@ func NewMock(t *testing.T) MockS3 {
 
 func (m *mockS3) S3() *s3.S3 { return m.fakes3 }
 func (m *mockS3) Close()     { m.srv.Quit() }
+
+func (m *mockS3) ListBuckets() map[string]s3test.Bucket {
+	return m.srv.Buckets()
+}
 
 // adds all the keys in mockBkt to the fake s3 server, sending nil data
 func (m *mockS3) Seed(mockBkt MockBucket) MockS3 {

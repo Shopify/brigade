@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/diff"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 	"github.com/kr/pretty"
 	"io"
 	"log"

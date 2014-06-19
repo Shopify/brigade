@@ -39,7 +39,7 @@ package list
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 	"github.com/dustin/go-humanize"
 	"io"
 	"log"
