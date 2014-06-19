@@ -46,28 +46,14 @@ build:
 
 test: fmt vet lint errcheck
 	@echo "=== go test ==="
-	@godep go test ./...
+	@godep go test ./... -cover
 
 deploy: test
 	# Compile
 	GOARCH=amd64 GOOS=linux godep go build -ldflags=$(GOLDFLAGS) -o brigade
-	#GOARCH=amd64 GOOS=linux godep go build -o brigade-s3-diff ./cmd/brigade-s3-diff/
-	#GOARCH=amd64 GOOS=linux godep go build -o brigade-s3-sync ./cmd/brigade-s3-sync/
-
 	# Copy binaries
-	@scp $(SSHKEY) brigade-s3-list $(DEPLOY_HOST):~/
-	#@scp $(SSHKEY) brigade-s3-diff $(DEPLOY_HOST):~/
-	#@scp $(SSHKEY) brigade-s3-sync $(DEPLOY_HOST):~/
-
+	@scp $(SSHKEY) brigade $(DEPLOY_HOST):~/
 	# Cleanup binaries
-	@rm brigade-s3-list
-	#@rm brigade-s3-diff
-	#@rm brigade-s3-sync
-
-	# Copy run scripts
-	@scp $(SSHKEY) ./cmd/brigade-s3-list/run_list.sh $(DEPLOY_HOST):~/
-	#@scp $(SSHKEY) ./cmd/brigade-s3-diff/run_diff.sh $(DEPLOY_HOST):~/
-	#@scp $(SSHKEY) ./cmd/brigade-s3-sync/run_sync.sh $(DEPLOY_HOST):~/
-
+	@rm brigade
 
 .PHONY: setup cloc errcheck vet lint fmt install build test deploy
