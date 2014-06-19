@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/Shopify/brigade",
-	"GoVersion": "go1.3rc1",
+	"GoVersion": "go1.3",
 	"Packages": [
 		"./..."
 	],
@@ -10,8 +10,16 @@
 			"Rev": "0db0bdb3cc7ff8ddff622052366e17f0d506b0ef"
 		},
 		{
+			"ImportPath": "github.com/aybabtme/goamz/aws",
+			"Rev": "656d36b62ffba6cf051ee2c25e8abb0d0e44c96f"
+		},
+		{
+			"ImportPath": "github.com/aybabtme/goamz/s3",
+			"Rev": "656d36b62ffba6cf051ee2c25e8abb0d0e44c96f"
+		},
+		{
 			"ImportPath": "github.com/aybabtme/uniplot/spark",
-			"Rev": "2658edae5ff45550d608376464a249bdd7500414"
+			"Rev": "15019e9ab54be3528feea4651eedebfca0d330c0"
 		},
 		{
 			"ImportPath": "github.com/bmizerany/perks/quantile",
@@ -31,20 +39,16 @@
 			"Rev": "820deefc9031d101f085ef773425fc6ca7a5363e"
 		},
 		{
-			"ImportPath": "github.com/crowdmob/goamz/aws",
-			"Rev": "09e68060fa9a495564d8e1c56191034c3d4f1c2b"
-		},
-		{
-			"ImportPath": "github.com/crowdmob/goamz/s3",
-			"Rev": "09e68060fa9a495564d8e1c56191034c3d4f1c2b"
-		},
-		{
 			"ImportPath": "github.com/dustin/go-humanize",
 			"Rev": "3cd90eb3d932037b141d4daff9a012e1aee7e765"
 		},
 		{
 			"ImportPath": "github.com/dustin/randbo",
 			"Rev": "7f1b564ca7242d22bcc6e2128beb90d9fa38b9f0"
+		},
+		{
+			"ImportPath": "github.com/eapache/queue",
+			"Rev": "e423872a64f5db1a1a9a04a0040dc00aeaf63b06"
 		},
 		{
 			"ImportPath": "github.com/kr/pretty",

@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
-	"github.com/crowdmob/goamz/s3"
+	"github.com/aybabtme/goamz/s3"
 	"io"
 	"io/ioutil"
 	"log"
@@ -67,23 +67,23 @@ type Server struct {
 	reqId    int
 	listener net.Listener
 	mu       sync.Mutex
-	buckets  map[string]*bucket
+	buckets  map[string]*Bucket
 	config   *Config
 }
 
-type bucket struct {
-	name    string
-	acl     s3.ACL
-	ctime   time.Time
-	objects map[string]*object
+type Bucket struct {
+	Name    string
+	Acl     s3.ACL
+	Ctime   time.Time
+	Objects map[string]*Object
 }
 
-type object struct {
-	name     string
-	mtime    time.Time
-	meta     http.Header // metadata to return with requests.
-	checksum []byte      // also held as Content-MD5 in meta.
-	data     []byte
+type Object struct {
+	Name     string
+	Mtime    time.Time
+	Meta     http.Header // metadata to return with requests.
+	Checksum []byte      // also held as Content-MD5 in meta.
+	Data     []byte
 }
 
 // A resource encapsulates the subject of an HTTP request.
@@ -104,7 +104,7 @@ func NewServer(config *Config) (*Server, error) {
 	srv := &Server{
 		listener: l,
 		url:      "http://" + l.Addr().String(),
-		buckets:  make(map[string]*bucket),
+		buckets:  make(map[string]*Bucket),
 		config:   config,
 	}
 	go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -121,6 +121,25 @@ func (srv *Server) Quit() {
 // URL returns a URL for the server.
 func (srv *Server) URL() string {
 	return srv.url
+}
+
+func (srv *Server) Buckets() map[string]Bucket {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	out := make(map[string]Bucket, len(srv.buckets))
+	for k, v := range srv.buckets {
+		out[k] = Bucket{
+			Name:    v.Name,
+			Acl:     v.Acl,
+			Ctime:   v.Ctime,
+			Objects: v.Objects,
+		}
+
+		for oname, odata := range v.Objects {
+			out[k].Objects[oname] = odata
+		}
+	}
+	return out
 }
 
 func fatalf(code int, codeStr string, errf string, a ...interface{}) {
@@ -156,7 +175,7 @@ func (srv *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		case *s3Error:
 			switch r := r.(type) {
 			case objectResource:
-				err.BucketName = r.bucket.name
+				err.BucketName = r.bucket.Name
 			case bucketResource:
 				err.BucketName = r.name
 			}
@@ -254,6 +273,7 @@ func (srv *Server) resourceForURL(u *url.URL) (r resource) {
 		fatalf(404, "NoSuchBucket", "The specified bucket does not exist")
 	}
 	objr := objectResource{
+		srv:     srv,
 		name:    objectName,
 		version: q.Get("versionId"),
 		bucket:  b.bucket,
@@ -263,7 +283,7 @@ func (srv *Server) resourceForURL(u *url.URL) (r resource) {
 			return nullResource{}
 		}
 	}
-	if obj := objr.bucket.objects[objr.name]; obj != nil {
+	if obj := objr.bucket.Objects[objr.name]; obj != nil {
 		objr.object = obj
 	}
 	return objr
@@ -286,7 +306,7 @@ const timeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 type bucketResource struct {
 	name   string
-	bucket *bucket // non-nil if the bucket already exists.
+	bucket *Bucket // non-nil if the bucket already exists.
 }
 
 // GET on a bucket lists the objects in the bucket.
@@ -315,7 +335,7 @@ func (r bucketResource) get(a *action) interface{} {
 	var objs orderedObjects
 
 	// first get all matching objects and arrange them in alphabetical order.
-	for name, obj := range r.bucket.objects {
+	for name, obj := range r.bucket.Objects {
 		if strings.HasPrefix(name, prefix) {
 			objs = append(objs, obj)
 		}
@@ -326,7 +346,7 @@ func (r bucketResource) get(a *action) interface{} {
 		maxKeys = 1000
 	}
 	resp := &s3.ListResp{
-		Name:      r.bucket.name,
+		Name:      r.bucket.Name,
 		Prefix:    prefix,
 		Delimiter: delimiter,
 		Marker:    marker,
@@ -335,14 +355,14 @@ func (r bucketResource) get(a *action) interface{} {
 
 	var prefixes []string
 	for _, obj := range objs {
-		if !strings.HasPrefix(obj.name, prefix) {
+		if !strings.HasPrefix(obj.Name, prefix) {
 			continue
 		}
-		name := obj.name
+		name := obj.Name
 		isPrefix := false
 		if delimiter != "" {
-			if i := strings.Index(obj.name[len(prefix):], delimiter); i >= 0 {
-				name = obj.name[:len(prefix)+i+len(delimiter)]
+			if i := strings.Index(obj.Name[len(prefix):], delimiter); i >= 0 {
+				name = obj.Name[:len(prefix)+i+len(delimiter)]
 				if prefixes != nil && prefixes[len(prefixes)-1] == name {
 					continue
 				}
@@ -360,7 +380,7 @@ func (r bucketResource) get(a *action) interface{} {
 			prefixes = append(prefixes, name)
 		} else {
 			// Contents contains only keys not found in CommonPrefixes
-			resp.Contents = append(resp.Contents, obj.s3Key())
+			resp.Contents = append(resp.Contents, obj.S3Key())
 		}
 	}
 	resp.CommonPrefixes = prefixes
@@ -369,7 +389,7 @@ func (r bucketResource) get(a *action) interface{} {
 
 // orderedObjects holds a slice of objects that can be sorted
 // by name.
-type orderedObjects []*object
+type orderedObjects []*Object
 
 func (s orderedObjects) Len() int {
 	return len(s)
@@ -378,15 +398,15 @@ func (s orderedObjects) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 func (s orderedObjects) Less(i, j int) bool {
-	return s[i].name < s[j].name
+	return s[i].Name < s[j].Name
 }
 
-func (obj *object) s3Key() s3.Key {
+func (obj *Object) S3Key() s3.Key {
 	return s3.Key{
-		Key:          obj.name,
-		LastModified: obj.mtime.Format(timeFormat),
-		Size:         int64(len(obj.data)),
-		ETag:         fmt.Sprintf(`"%x"`, obj.checksum),
+		Key:          obj.Name,
+		LastModified: obj.Mtime.Format(timeFormat),
+		Size:         int64(len(obj.Data)),
+		ETag:         fmt.Sprintf(`"%x"`, obj.Checksum),
 		// TODO StorageClass
 		// TODO Owner
 	}
@@ -398,10 +418,10 @@ func (r bucketResource) delete(a *action) interface{} {
 	if b == nil {
 		fatalf(404, "NoSuchBucket", "The specified bucket does not exist")
 	}
-	if len(b.objects) > 0 {
+	if len(b.Objects) > 0 {
 		fatalf(400, "BucketNotEmpty", "The bucket you tried to delete is not empty")
 	}
-	delete(a.srv.buckets, b.name)
+	delete(a.srv.buckets, b.Name)
 	return nil
 }
 
@@ -417,10 +437,10 @@ func (r bucketResource) put(a *action) interface{} {
 			fatalf(400, "InvalidRequets", "The unspecified location constraint is incompatible for the region specific endpoint this request was sent to.")
 		}
 		// TODO validate acl
-		r.bucket = &bucket{
-			name: r.name,
+		r.bucket = &Bucket{
+			Name: r.name,
 			// TODO default acl
-			objects: make(map[string]*object),
+			Objects: make(map[string]*Object),
 		}
 		a.srv.buckets[r.name] = r.bucket
 		created = true
@@ -428,7 +448,8 @@ func (r bucketResource) put(a *action) interface{} {
 	if !created && a.srv.config.send409Conflict() {
 		fatalf(409, "BucketAlreadyOwnedByYou", "Your previous request to create the named bucket succeeded and you already own it.")
 	}
-	r.bucket.acl = s3.ACL(a.req.Header.Get("x-amz-acl"))
+	r.bucket.Acl = s3.ACL(a.req.Header.Get("x-amz-acl"))
+
 	return nil
 }
 
@@ -484,10 +505,11 @@ var responseParams = map[string]bool{
 }
 
 type objectResource struct {
+	srv     *Server
 	name    string
 	version string
-	bucket  *bucket // always non-nil.
-	object  *object // may be nil.
+	bucket  *Bucket // always non-nil.
+	object  *Object // may be nil.
 }
 
 // GET on an object gets the contents of the object.
@@ -499,7 +521,7 @@ func (objr objectResource) get(a *action) interface{} {
 	}
 	h := a.w.Header()
 	// add metadata
-	for name, d := range obj.meta {
+	for name, d := range obj.Meta {
 		h[name] = d
 	}
 	// override header values in response to request parameters.
@@ -522,14 +544,14 @@ func (objr objectResource) get(a *action) interface{} {
 	// TODO If-None-Match
 	// TODO Connection: close ??
 	// TODO x-amz-request-id
-	h.Set("Content-Length", fmt.Sprint(len(obj.data)))
-	h.Set("ETag", hex.EncodeToString(obj.checksum))
-	h.Set("Last-Modified", obj.mtime.Format(time.RFC1123))
+	h.Set("Content-Length", fmt.Sprint(len(obj.Data)))
+	h.Set("ETag", hex.EncodeToString(obj.Checksum))
+	h.Set("Last-Modified", obj.Mtime.Format(time.RFC1123))
 	if a.req.Method == "HEAD" {
 		return nil
 	}
 	// TODO avoid holding the lock when writing data.
-	_, err := a.w.Write(obj.data)
+	_, err := a.w.Write(obj.Data)
 	if err != nil {
 		// we can't do much except just log the fact.
 		log.Printf("error writing data: %v", err)
@@ -555,9 +577,9 @@ func (objr objectResource) put(a *action) interface{} {
 	// TODO is this correct, or should we erase all previous metadata?
 	obj := objr.object
 	if obj == nil {
-		obj = &object{
-			name: objr.name,
-			meta: make(http.Header),
+		obj = &Object{
+			Name: objr.name,
+			Meta: make(http.Header),
 		}
 	}
 
@@ -587,18 +609,35 @@ func (objr objectResource) put(a *action) interface{} {
 	for key, values := range a.req.Header {
 		key = http.CanonicalHeaderKey(key)
 		if metaHeaders[key] || strings.HasPrefix(key, "X-Amz-Meta-") {
-			obj.meta[key] = values
+			obj.Meta[key] = values
 		}
 	}
-	obj.data = data
-	obj.checksum = gotHash
-	obj.mtime = time.Now()
-	objr.bucket.objects[objr.name] = obj
+
+	source := a.req.Header.Get("x-amz-copy-source")
+	if source != "" {
+		parts := strings.SplitN(source, "/", 2)
+		srcBkt, ok := objr.srv.buckets[parts[0]]
+		if !ok {
+			fatalf(404, "NoSuchBucket", "bad source bucket:"+parts[0])
+		}
+		srcObj, ok := srcBkt.Objects[parts[1]]
+		if !ok {
+			fatalf(404, "NoSuchKey", "bad source key:"+parts[1])
+		}
+		obj.Data = srcObj.Data
+		obj.Checksum = srcObj.Checksum
+	} else {
+		obj.Data = data
+		obj.Checksum = gotHash
+	}
+
+	obj.Mtime = time.Now()
+	objr.bucket.Objects[objr.name] = obj
 	return nil
 }
 
 func (objr objectResource) delete(a *action) interface{} {
-	delete(objr.bucket.objects, objr.name)
+	delete(objr.bucket.Objects, objr.name)
 	return nil
 }
 

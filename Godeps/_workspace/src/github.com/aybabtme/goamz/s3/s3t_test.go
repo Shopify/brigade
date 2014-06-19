@@ -1,9 +1,9 @@
 package s3_test
 
 import (
-	"github.com/crowdmob/goamz/aws"
-	"github.com/crowdmob/goamz/s3"
-	"github.com/crowdmob/goamz/s3/s3test"
+	"github.com/aybabtme/goamz/aws"
+	"github.com/aybabtme/goamz/s3"
+	"github.com/aybabtme/goamz/s3/s3test"
 	"gopkg.in/check.v1"
 )
 
