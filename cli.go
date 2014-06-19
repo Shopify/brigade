@@ -218,7 +218,11 @@ func syncCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 		srcBkt := sss.Bucket(srcU.Host)
 		dstBkt := sss.Bucket(dstU.Host)
 
-		sync.Sync(elog, gr, srcBkt, dstBkt, opts)
+		err = sync.Sync(elog, gr, srcBkt, dstBkt, opts)
+		if err != nil {
+			elog.Printf("failed to sync: %v", err)
+		}
+
 	}
 
 	return []cli.Flag{filenameFlag, srcFlag, dstFlag, regionFlag, concurrencyFlag}, action
