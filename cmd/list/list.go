@@ -178,10 +178,10 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 
 		// track some metrics
 		stats.Lock()
-		stats.worktodo = int64(len(workSet))
+		stats.workToDo = int64(len(workSet))
 		stats.followers = int64(followers.Len())
-		stats.jobspersec++
-		stats.qtstream.Insert(float64(doneJob.duration.Nanoseconds()))
+		stats.jobsPerSec++
+		stats.qtStream.Insert(float64(doneJob.duration.Nanoseconds()))
 		stats.Unlock()
 
 		// if the job was in error, maybe try to reenqueue it
@@ -207,8 +207,8 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 		}
 
 		stats.Lock()
-		stats.newkeys += int64(len(doneJob.keys))
-		stats.newleads += int64(len(doneJob.followers))
+		stats.newKeys += int64(len(doneJob.keys))
+		stats.newLeads += int64(len(doneJob.followers))
 		stats.Unlock()
 	}
 
@@ -236,8 +236,8 @@ func visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[stri
 			visited[key.Key] = struct{}{}
 		}
 
-		stats.totalkeys++
-		stats.totalsize += uint64(key.Size)
+		stats.totalKeys++
+		stats.totalSize += uint64(key.Size)
 		visitor(key)
 	}
 }

@@ -22,7 +22,7 @@ func (l *lifoJobs) Add(job *Job)  { l.stack = append(l.stack, job) }
 func (l *lifoJobs) Peek() *Job    { return l.stack[len(l.stack)-1] }
 func (l *lifoJobs) Remove() *Job {
 	item := l.stack[len(l.stack)-1]
-	l.stack = l.stack[0 : len(l.stack)-1]
+	l.stack = l.stack[:len(l.stack)-1]
 	return item
 }
 
@@ -67,23 +67,23 @@ func newJob(rel string) *Job {
 type walkStats struct {
 	sync.Mutex
 
-	worktodo  int64
+	workToDo  int64
 	followers int64
 
-	newkeys    int64
-	newleads   int64
-	totalkeys  int64
-	jobspersec int64
-	totalsize  uint64
+	newKeys    int64
+	newLeads   int64
+	totalKeys  int64
+	jobsPerSec int64
+	totalSize  uint64
 	mem        runtime.MemStats
-	qtstream   *quantile.Stream
+	qtStream   *quantile.Stream
 
 	tick *time.Ticker
 }
 
 func newWalkStats() *walkStats {
 	stats := &walkStats{
-		qtstream: quantile.NewTargeted(0.50, 0.95),
+		qtStream: quantile.NewTargeted(0.50, 0.95),
 		tick:     time.NewTicker(time.Second),
 	}
 
@@ -104,23 +104,23 @@ func (w *walkStats) printProgress() {
 	curInflight := atomic.LoadInt64(&inflight)
 
 	runtime.ReadMemStats(&w.mem)
-	p50 := time.Duration(int64(w.qtstream.Query(0.50)))
-	p95 := time.Duration(int64(w.qtstream.Query(0.95)))
+	p50 := time.Duration(int64(w.qtStream.Query(0.50)))
+	p95 := time.Duration(int64(w.qtStream.Query(0.95)))
 
 	log.Printf("mem=%s\tjobs/s=%s\twork=%s\tfollow=%s\tinflight=%s\tkeys=%s\tbktsize=%s\tnew=%s\tleads=%s\tp50=%v\tp95=%v",
 		humanize.Bytes(w.mem.Sys-w.mem.HeapReleased),
-		humanize.Comma(w.jobspersec),
-		humanize.Comma(w.worktodo),
+		humanize.Comma(w.jobsPerSec),
+		humanize.Comma(w.workToDo),
 		humanize.Comma(w.followers),
 		humanize.Comma(curInflight),
-		humanize.Comma(w.totalkeys),
-		humanize.Bytes(w.totalsize),
-		humanize.Comma(w.newkeys),
-		humanize.Comma(w.newleads),
+		humanize.Comma(w.totalKeys),
+		humanize.Bytes(w.totalSize),
+		humanize.Comma(w.newKeys),
+		humanize.Comma(w.newLeads),
 		p50,
 		p95)
-	w.newkeys = 0
-	w.newleads = 0
-	w.jobspersec = 0
-	w.qtstream.Reset()
+	w.newKeys = 0
+	w.newLeads = 0
+	w.jobsPerSec = 0
+	w.qtStream.Reset()
 }
