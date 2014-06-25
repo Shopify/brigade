@@ -55,7 +55,7 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
 	log.Printf("reading old key list...")
-	keyset, olderr := readOldList(oldList)
+	knownKeys, olderr := readOldList(oldList)
 	switch olderr {
 	case io.ErrUnexpectedEOF:
 		elog.Printf("reading old source: %v", olderr)
@@ -67,10 +67,10 @@ func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 		return nil, fmt.Errorf("reading old source, %v", olderr)
 	}
 
-	log.Printf("old list contains %s keys", humanize.Comma(int64(keyset.Len())))
+	log.Printf("old list contains %s keys", humanize.Comma(int64(knownKeys.Len())))
 
 	log.Printf("reading new key list...")
-	diff, listlen, newerr := readNewList(newList, keyset)
+	diff, listlen, newerr := filterNewKeys(newList, knownKeys)
 	switch newerr {
 	case io.ErrUnexpectedEOF:
 		elog.Printf("reading new source: %v", newerr)
@@ -134,7 +134,7 @@ func readOldList(src io.Reader) (keySet, error) {
 	return keyset, nil
 }
 
-func readNewList(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
+func filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 
 	decoders := make(chan []byte, runtime.NumCPU()*bufferFactor)
 	keys := make(chan s3.Key, runtime.NumCPU()*bufferFactor)
