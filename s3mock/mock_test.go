@@ -3,7 +3,7 @@ package s3mock_test
 import (
 	"bytes"
 	"github.com/Shopify/brigade/s3mock"
-	"github.com/Shopify/brigade/s3util"
+	"github.com/aybabtme/goamz/s3"
 	"testing"
 )
 
@@ -31,7 +31,7 @@ func TestPerfMockBucketUnknownKey(t *testing.T) {
 
 	data, err := bkt.Get("not a key in this bucket")
 
-	if !s3util.IsS3Error(err, s3util.ErrNoSuchKey) {
+	if !s3.IsS3Error(err, s3.ErrNoSuchKey) {
 		t.Errorf("expected 'no such key' error, got %v", err)
 	}
 
