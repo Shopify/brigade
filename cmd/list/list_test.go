@@ -18,7 +18,7 @@ import (
 func TestCanListBucketWithoutDedup(t *testing.T) {
 	dedup := false
 	elog := testlogger(t)
-	withPerfBucket(t, func(t *testing.T, s3 s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
+	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
 		return list.List(elog, s3.S3(), "s3://"+bkt.Name(), w, dedup)
 	})
 
@@ -27,7 +27,7 @@ func TestCanListBucketWithoutDedup(t *testing.T) {
 func TestCanListBucketWithDedup(t *testing.T) {
 	dedup := true
 	elog := testlogger(t)
-	withPerfBucket(t, func(t *testing.T, s3 s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
+	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
 		return list.List(elog, s3.S3(), "s3://"+bkt.Name(), w, dedup)
 	})
 }
@@ -77,7 +77,7 @@ func TestCanHandleS3Errors(t *testing.T) {
 
 // test context builders
 
-func withPerfBucket(t *testing.T, f func(*testing.T, s3mock.MockS3, s3mock.MockBucket, io.Writer) error) {
+func withPerfBucket(t *testing.T, f func(*testing.T, *s3mock.MockS3, s3mock.MockBucket, io.Writer) error) {
 	log.SetOutput(testwriter(t))
 
 	mockBkt := s3mock.NewPerfBucket(t)

@@ -14,19 +14,6 @@ import (
 
 // Collections
 
-type jobsColl interface {
-	IsEmpty() bool
-	Add(*Job)
-	Remove() *Job
-	Peek() *Job
-	Len() int
-}
-
-var (
-	// Compile check
-	_ jobsColl = &lifoJobs{}
-)
-
 type lifoJobs struct{ stack []*Job }
 
 func (l *lifoJobs) IsEmpty() bool { return len(l.stack) == 0 }

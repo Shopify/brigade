@@ -131,11 +131,10 @@ func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error
 
 func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Key)) error {
 
-	// Data structures needed for the BFS
+	// Data structures needed for the DF traversal
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
-	// LIFO will do a DF traversal
 	followers := &lifoJobs{}
 	visited := make(map[string]struct{})
 	workSet := make(jobSet)
