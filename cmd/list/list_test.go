@@ -158,5 +158,5 @@ func sortKeys(orig []s3.Key) []s3.Key {
 type keyslice []s3.Key
 
 func (k keyslice) Len() int           { return len(k) }
-func (k *keyslice) Swap(i, j int)     { (*k)[i], (*k)[j] = (*k)[j], (*k)[i] }
+func (k keyslice) Swap(i, j int)      { k[i], k[j] = k[j], k[i] }
 func (k keyslice) Less(i, j int) bool { return bytes.Compare([]byte(k[i].Key), []byte(k[j].Key)) == -1 }
