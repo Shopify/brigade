@@ -16,7 +16,7 @@
 // When a worker visited a Job edge, it updates the Job and send it
 // back on the `result` channel.
 //
-// The main loop keeps trakcs of the jobs it has sent to workers (workSet),
+// The main loop keeps tracks of the jobs it has sent to workers (workSet),
 // and of the followers it need to create Job objects for.
 //
 // After each iteration of the search, there are three possible states:
@@ -66,6 +66,7 @@ var (
 )
 
 var (
+	lock sync.Mutex
 	elog *log.Logger
 	root = func(path string) *url.URL {
 		u, err := url.Parse(path)
@@ -79,7 +80,8 @@ var (
 // List an s3 bucket and write the keys in JSON form to dst. If dedup, will
 // deduplicate all keys using a set (consumes more memory).
 func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) error {
-
+	lock.Lock()
+	defer lock.Unlock()
 	elog = el
 	srcU, srcErr := url.Parse(src)
 	if srcErr != nil {
