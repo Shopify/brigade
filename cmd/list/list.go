@@ -294,8 +294,8 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 			// when there's an error, sleep for a bit before reenqueuing
 			// the job. This avoids retrying keys that are on a partition
 			// that is overloaded, and various network issues.
-			attempsSoFar := float64(MaxRetry - job.retryLeft + 1)
-			backoff := math.Pow(2.0, attempsSoFar)
+			attemptsSoFar := float64(MaxRetry - job.retryLeft + 1)
+			backoff := math.Pow(2.0, attemptsSoFar)
 			sleepFor := time.Duration(backoff) * InitRetry
 			elog.Printf("worker-sleep-on-error=%v\tbackoff=%v", sleepFor, backoff)
 			time.Sleep(sleepFor)
