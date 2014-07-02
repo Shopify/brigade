@@ -17,26 +17,30 @@ import (
 
 var (
 	bufferFactor = 10
-	elog         *log.Logger
 )
+
+type diffTask struct {
+	elog *log.Logger
+}
 
 // Diff reads s3 keys in JSON form from old and new list, compute which
 // keys have changed from the old to the new one, writing those keys
 // to the output writer (in JSON as well).
 func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
-	elog = el
+
+	differ := diffTask{elog: el}
 
 	start := time.Now()
 
 	log.Printf("computing difference in keys")
-	diff, differr := computeDifference(oldList, newList)
+	diff, differr := differ.computeDifference(oldList, newList)
 	if differr != nil && len(diff) == 0 {
 		return fmt.Errorf("computing source difference, produced no diff, %v", differr)
 	}
 
 	log.Printf("done computing difference in %v: %s keys differ", time.Since(start), humanize.Comma(int64(len(diff))))
 
-	writeerr := writeDiff(output, diff)
+	writeerr := differ.writeDiff(output, diff)
 
 	log.Printf("done writing difference in %v", time.Since(start))
 
@@ -52,16 +56,16 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 	}
 }
 
-func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
+func (dt *diffTask) computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
 	log.Printf("reading old key list...")
-	knownKeys, olderr := readOldList(oldList)
+	knownKeys, olderr := dt.readOldList(oldList)
 	switch olderr {
 	case io.ErrUnexpectedEOF:
-		elog.Printf("reading old source: %v", olderr)
-		// continue
+		dt.elog.Printf("reading old source: %v", olderr)
+		// carry on
 	case nil:
-		// continue
+		// carry on
 	default:
 		// not nil, not UnexpectedEOF; bail
 		return nil, fmt.Errorf("reading old source, %v", olderr)
@@ -70,13 +74,13 @@ func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 	log.Printf("old list contains %s keys", humanize.Comma(int64(knownKeys.Len())))
 
 	log.Printf("reading new key list...")
-	diff, listlen, newerr := filterNewKeys(newList, knownKeys)
+	diff, listlen, newerr := dt.filterNewKeys(newList, knownKeys)
 	switch newerr {
 	case io.ErrUnexpectedEOF:
-		elog.Printf("reading new source: %v", newerr)
-		// continue
+		dt.elog.Printf("reading new source: %v", newerr)
+		// carry on
 	case nil:
-		// continue
+		// carry on
 	default:
 		// not nil, not UnexpectedEOF; bail
 		return nil, fmt.Errorf("reading first source, %v", newerr)
@@ -96,7 +100,7 @@ func computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 	}
 }
 
-func readOldList(src io.Reader) (keySet, error) {
+func (dt *diffTask) readOldList(src io.Reader) (keySet, error) {
 	keyset := newKeyMap()
 	decoders := make(chan []byte, runtime.NumCPU()*bufferFactor)
 	keys := make(chan s3.Key, runtime.NumCPU()*bufferFactor)
@@ -118,10 +122,10 @@ func readOldList(src io.Reader) (keySet, error) {
 	wg := sync.WaitGroup{}
 	for _ = range iter.N(runtime.NumCPU()) {
 		wg.Add(1)
-		go decode(&wg, decoders, keys)
+		go dt.decode(&wg, decoders, keys)
 	}
 
-	if err := readLines(src, decoders); err != nil {
+	if err := dt.readLines(src, decoders); err != nil {
 		wg.Wait()
 		close(keys)
 		<-doneSrcA
@@ -134,7 +138,7 @@ func readOldList(src io.Reader) (keySet, error) {
 	return keyset, nil
 }
 
-func filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
+func (dt *diffTask) filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 
 	decoders := make(chan []byte, runtime.NumCPU()*bufferFactor)
 	keys := make(chan s3.Key, runtime.NumCPU()*bufferFactor)
@@ -162,10 +166,10 @@ func filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 	wg := sync.WaitGroup{}
 	for _ = range iter.N(runtime.NumCPU()) {
 		wg.Add(1)
-		go decode(&wg, decoders, keys)
+		go dt.decode(&wg, decoders, keys)
 	}
 
-	if err := readLines(src, decoders); err != nil {
+	if err := dt.readLines(src, decoders); err != nil {
 		wg.Wait()
 		close(keys)
 		<-doneDiffing
@@ -179,7 +183,7 @@ func filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, error) {
 	return diffKeys, newKeys, nil
 }
 
-func writeDiff(w io.Writer, keys []s3.Key) error {
+func (dt *diffTask) writeDiff(w io.Writer, keys []s3.Key) error {
 	enc := json.NewEncoder(w)
 	for i, k := range keys {
 		err := enc.Encode(k)
@@ -190,7 +194,7 @@ func writeDiff(w io.Writer, keys []s3.Key) error {
 	return nil
 }
 
-func readLines(r io.Reader, decoders chan<- []byte) error {
+func (dt *diffTask) readLines(r io.Reader, decoders chan<- []byte) error {
 	defer close(decoders)
 	rd := bufio.NewReader(r)
 	for {
@@ -208,13 +212,13 @@ func readLines(r io.Reader, decoders chan<- []byte) error {
 }
 
 // decodes s3.Keys from a channel of bytes, each byte containing a full key
-func decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- s3.Key) {
+func (dt *diffTask) decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- s3.Key) {
 	defer wg.Done()
 	var key s3.Key
 	for line := range lines {
 		err := json.Unmarshal(line, &key)
 		if err != nil {
-			elog.Printf("unmarshaling line: %v", err)
+			dt.elog.Printf("unmarshaling line: %v", err)
 		} else {
 			keys <- key
 		}

@@ -78,7 +78,7 @@ func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 	output := bytes.NewBuffer(nil)
 	err := diff.Diff(testlogger(t), oldList, newList, output)
 
-	//verify
+	// verify
 	if err == nil {
 		t.Fatalf("should have received an error, got nothing")
 	} else {
@@ -105,7 +105,7 @@ func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 	output := bytes.NewBuffer(nil)
 	err := diff.Diff(testlogger(t), oldList, newList, output)
 
-	//verify
+	// verify
 	if err == nil {
 		t.Fatalf("should have received an error, got nothing")
 	} else {
@@ -231,8 +231,8 @@ func sortKeys(orig []s3.Key) []s3.Key {
 
 type keyslice []s3.Key
 
-func (k keyslice) Len() int       { return len(k) }
-func (k *keyslice) Swap(i, j int) { (*k)[i], (*k)[j] = (*k)[j], (*k)[i] }
+func (k keyslice) Len() int      { return len(k) }
+func (k keyslice) Swap(i, j int) { k[i], k[j] = k[j], k[i] }
 func (k keyslice) Less(i, j int) bool {
 	return bytes.Compare([]byte(k[i].ETag), []byte(k[j].ETag)) == -1
 }
