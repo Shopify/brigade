@@ -210,7 +210,7 @@ func testwriter(t *testing.T) io.Writer {
 
 // magic, a testing.T logger!
 func testlogger(t *testing.T) *log.Logger {
-	return log.New(io.MultiWriter(testwriter(t), os.Stderr), "[test]", 0)
+	return log.New(io.MultiWriter(testwriter(t), os.Stderr), "[test] ", log.Lshortfile)
 }
 
 // decode s3 keys from a json reader, fatals on error

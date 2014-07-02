@@ -18,53 +18,82 @@ type sliceTask struct {
 	elog *log.Logger
 }
 
+type subfile struct {
+	name    string
+	file    *os.File
+	buffer  *bufio.Writer
+	gzipper *gzip.Writer
+}
+
+func newSubFile(filename string) (*subfile, error) {
+	file, err := os.Create(filename)
+	if err != nil {
+		return nil, fmt.Errorf("creating %q, %v", filename, err)
+	}
+	buffer := bufio.NewWriter(file)
+	return &subfile{
+		name:    filename,
+		file:    file,
+		buffer:  buffer,
+		gzipper: gzip.NewWriter(buffer),
+	}, nil
+}
+
+func (s *subfile) Write(p []byte) (int, error) {
+	return s.gzipper.Write(p)
+}
+
+func (s *subfile) Close() error {
+	if err := s.gzipper.Close(); err != nil {
+		return fmt.Errorf("closing gzip stream for file %q", s.name)
+	}
+
+	if err := s.buffer.Flush(); err != nil {
+		return fmt.Errorf("flushing buffered stream for file %q", s.name)
+	}
+	if err := s.file.Close(); err != nil {
+		return fmt.Errorf("closing file %q", s.name)
+	}
+	return nil
+}
+
 // Slice creates n subparts from the gzip'd JSON file at `filename`.
 func Slice(el *log.Logger, filename string, n int) (filenames []string, err error) {
 	slicer := sliceTask{elog: el}
 
-	// capture errors thrown by `must` helpers
-	defer func() {
-		r := recover()
-		if rerr, ok := r.(error); ok {
-			err = rerr
-		} else if r != nil {
-			panic(r)
-		}
-	}()
-
-	inputfile, size := mustOpen(el, filename)
+	inputfile, size, err := open(el, filename)
+	if err != nil {
+		return nil, err
+	}
 	defer func() { err = inputfile.Close() }()
 
 	log.Printf("creating %d output files", n)
 	basename := filepath.Base(filename)
-	outputs := make([]io.Writer, n)
+
+	subfiles := make([]*subfile, 0, n)
+	defer func() {
+		for _, out := range subfiles {
+			if cerr := out.Close(); cerr != nil {
+				el.Print(err)
+				err = cerr
+			}
+		}
+	}()
+
 	for i := range iter.N(n) {
 		outfilename := fmt.Sprintf("%d_%s", i, basename)
 		filenames = append(filenames, outfilename)
-
-		outf := mustCreate(el, outfilename)
-		outbuf := bufio.NewWriter(outf)
-		gzw := gzip.NewWriter(outbuf)
-		outputs[i] = gzw
-		log.Printf("\toutput file %d: %q", i, outfilename)
-		defer func(filename string) {
-			if err := gzw.Close(); err != nil {
-				el.Printf("closing gzip stream for file %q", outfilename)
-			}
-
-			if err := outbuf.Flush(); err != nil {
-				el.Printf("flushing buffered stream for file %q", outfilename)
-			}
-			if err := outf.Close(); err != nil {
-				el.Printf("closing file %q", outfilename)
-			}
-		}(outfilename)
+		out, err := newSubFile(outfilename)
+		if err != nil {
+			return nil, fmt.Errorf("preparing subfile %d, %v", i, err)
+		}
+		subfiles = append(subfiles, out)
 	}
 
 	lines := make(chan []byte, n*2)
 	doneWrite := make(chan struct{})
 	start := time.Now()
-	go slicer.multiplexLines(lines, outputs, doneWrite)
+	go slicer.multiplexLines(lines, subfiles, doneWrite)
 
 	log.Printf("reading lines from %q (%s)", filename, humanize.Bytes(uint64(size)))
 	if err := readLines(inputfile, size, lines); err != nil {
@@ -73,12 +102,12 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 	log.Printf("done reading lines in %v", time.Since(start))
 
 	<-doneWrite
-	log.Printf("done writing to outputs in %v", time.Since(start))
+	log.Printf("done writing to subfiles in %v", time.Since(start))
 
 	return filenames, nil
 }
 
-func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []io.Writer, done chan<- struct{}) {
+func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, done chan<- struct{}) {
 	defer close(done)
 	outIdx := 0
 	outMod := len(outputs)
@@ -129,23 +158,15 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	}
 }
 
-func mustOpen(elog *log.Logger, filename string) (*os.File, int64) {
+func open(elog *log.Logger, filename string) (*os.File, int64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		elog.Panicf("couldn't open file %q: %v", filename, err)
+		return nil, -1, fmt.Errorf("opening file %q: %v", filename, err)
 	}
 	fi, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		elog.Panicf("couldn't stat file %q: %v", filename, err)
+		return nil, -1, fmt.Errorf("stating file %q: %v", filename, err)
 	}
-	return file, fi.Size()
-}
-
-func mustCreate(elog *log.Logger, filename string) *os.File {
-	file, err := os.Create(filename)
-	if err != nil {
-		elog.Panicf("couldn't create file %q: %v", filename, err)
-	}
-	return file
+	return file, fi.Size(), nil
 }
