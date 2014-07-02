@@ -66,8 +66,6 @@ var (
 )
 
 var (
-	lock sync.Mutex
-	elog *log.Logger
 	root = func(path string) *url.URL {
 		u, err := url.Parse(path)
 		if err != nil {
@@ -77,12 +75,14 @@ var (
 	}("/")
 )
 
+type listTask struct {
+	elog *log.Logger
+}
+
 // List an s3 bucket and write the keys in JSON form to dst. If dedup, will
 // deduplicate all keys using a set (consumes more memory).
 func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) error {
-	lock.Lock()
-	defer lock.Unlock()
-	elog = el
+
 	srcU, srcErr := url.Parse(src)
 	if srcErr != nil {
 		return fmt.Errorf("not a valid bucket URL: %v", srcErr)
@@ -97,14 +97,15 @@ func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) err
 		enc := json.NewEncoder(w)
 		for k := range keys {
 			if err := enc.Encode(k); err != nil {
-				elog.Fatalf("Couldn't encode key %q: %v", k.Key, err)
+				el.Fatalf("Couldn't encode key %q: %v", k.Key, err)
 			}
 		}
 	}(dst)
 
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
-	err := listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
+	lister := listTask{elog: el}
+	err := lister.listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
 	close(keys)
 	<-encDone
@@ -114,14 +115,14 @@ func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) err
 	return nil
 }
 
-func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error {
+func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error {
 
 	srcBkt := sss.Bucket(src.Host)
 
 	var count uint64
 	var size uint64
 	start := time.Now()
-	err := walkPath(srcBkt, src.Path, dedup, func(key s3.Key) {
+	err := l.walkPath(srcBkt, src.Path, dedup, func(key s3.Key) {
 		count++
 		size += uint64(key.Size)
 		f(key)
@@ -131,7 +132,7 @@ func listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error
 	return err
 }
 
-func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Key)) error {
+func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Key)) error {
 
 	// Data structures needed for the DF traversal
 	fringe := make(chan *Job, Concurrency)
@@ -154,7 +155,7 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	wg := sync.WaitGroup{}
 	for i := 0; i < Concurrency; i++ {
 		wg.Add(1)
-		go listWorker(&wg, bkt, fringe, result)
+		go l.listWorker(&wg, bkt, fringe, result)
 	}
 
 	for !workSet.IsEmpty() {
@@ -190,21 +191,21 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 		if doneJob.err != nil {
 			if doneJob.retryLeft > 0 {
 				doneJob.retryLeft--
-				elog.Printf("job=%d\tretrying\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
+				l.elog.Printf("job=%d\tretrying\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 				doneJob.err = nil
 				followers.Add(doneJob)
 				workSet.Add(doneJob)
 			} else {
-				elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
+				l.elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 			}
 			continue
 		} else if doneJob.retryLeft != MaxRetry {
 			log.Printf("job=%d\trescued\tretries=%d", doneJob.id, doneJob.retryLeft)
 		}
 
-		visitKeys(doneJob.keys, keyVisitor, dedup, visited, stats)
+		l.visitKeys(doneJob.keys, keyVisitor, dedup, visited, stats)
 
-		for _, job := range jobsFromFollowers(doneJob.followers, workSet, dedup, visited) {
+		for _, job := range l.jobsFromFollowers(doneJob.followers, workSet, dedup, visited) {
 			followers.Add(job)
 		}
 
@@ -228,11 +229,11 @@ func walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Ke
 	return nil
 }
 
-func visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}, stats *walkStats) {
+func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}, stats *walkStats) {
 	for _, key := range keys {
 		if dedup {
 			if _, ok := visited[key.Key]; ok {
-				elog.Printf("deduplicate-key=%q", key.Key)
+				l.elog.Printf("deduplicate-key=%q", key.Key)
 				continue
 			}
 			visited[key.Key] = struct{}{}
@@ -244,7 +245,7 @@ func visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[stri
 	}
 }
 
-func jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visited map[string]struct{}) []*Job {
+func (l *listTask) jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visited map[string]struct{}) []*Job {
 	var newJobs []*Job
 	for _, follow := range newFollowers {
 		// prepare a new job, add it to the worker set and
@@ -253,7 +254,7 @@ func jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visite
 
 		if dedup {
 			if _, ok := visited[newjob.path]; ok {
-				elog.Printf("deduplicate-job=%q", newjob.path)
+				l.elog.Printf("deduplicate-job=%q", newjob.path)
 				continue
 			}
 		}
@@ -278,7 +279,7 @@ var inflight int64
 
 // list workers receives jobs and LIST the path in those jobs, sleeping between
 // retryable errors before re-enqueing them.
-func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<- *Job) {
+func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<- *Job) {
 	defer wg.Done()
 	for job := range jobs {
 		// track duration + inflight requests
@@ -297,9 +298,9 @@ func listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<-
 			attemptsSoFar := float64(MaxRetry - job.retryLeft + 1)
 			backoff := math.Pow(2.0, attemptsSoFar)
 			sleepFor := time.Duration(backoff) * InitRetry
-			elog.Printf("worker-sleep-on-error=%v\tbackoff=%v", sleepFor, backoff)
+			l.elog.Printf("worker-sleep-on-error=%v\tbackoff=%v", sleepFor, backoff)
 			time.Sleep(sleepFor)
-			elog.Printf("worker-woke-up")
+			l.elog.Printf("worker-woke-up")
 		} else {
 			// if all went well, set the job results
 			job.keys = res.Contents
