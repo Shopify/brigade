@@ -144,12 +144,8 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	defer close(lines)
 	// wraps the reader with a progress bar, because it's convenient
 	// to know what's going on while the tool runs.
-	bar := pb.New(int(size))
-	bar.ShowBar = true
-	bar.ShowCounters = true
-	bar.ShowPercent = true
+	bar := pb.New64(size)
 	bar.ShowSpeed = true
-	bar.ShowTimeLeft = true
 	bar.SetUnits(pb.U_BYTES)
 	barr := bar.NewProxyReader(r)
 
