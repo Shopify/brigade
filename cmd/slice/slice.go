@@ -14,10 +14,12 @@ import (
 	"time"
 )
 
+// sliceTask slices a gzip'd, line separated JSON file into subfiles
 type sliceTask struct {
 	elog *log.Logger
 }
 
+// subfile writes gzip'd content to its enclosing file.
 type subfile struct {
 	name    string
 	file    *os.File
@@ -25,6 +27,8 @@ type subfile struct {
 	gzipper *gzip.Writer
 }
 
+// newSubFile creates a new file and wraps it with a buffered,
+// gzip writer.
 func newSubFile(filename string) (*subfile, error) {
 	file, err := os.Create(filename)
 	if err != nil {
@@ -39,10 +43,12 @@ func newSubFile(filename string) (*subfile, error) {
 	}, nil
 }
 
+// Write to the subfile.
 func (s *subfile) Write(p []byte) (int, error) {
 	return s.gzipper.Write(p)
 }
 
+// Close the gzip stream, flush the buffer and close the file.
 func (s *subfile) Close() error {
 	if err := s.gzipper.Close(); err != nil {
 		return fmt.Errorf("closing gzip stream for file %q", s.name)
@@ -61,16 +67,18 @@ func (s *subfile) Close() error {
 func Slice(el *log.Logger, filename string, n int) (filenames []string, err error) {
 	slicer := sliceTask{elog: el}
 
-	inputfile, size, err := open(el, filename)
+	// open the input file
+	inputfile, size, err := open(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = inputfile.Close() }()
 
+	// create n subfiles to which we will write
 	log.Printf("creating %d output files", n)
 	basename := filepath.Base(filename)
-
 	subfiles := make([]*subfile, 0, n)
+	// close them all, log errors but report only the last one
 	defer func() {
 		for _, out := range subfiles {
 			if cerr := out.Close(); cerr != nil {
@@ -79,7 +87,6 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 			}
 		}
 	}()
-
 	for i := range iter.N(n) {
 		outfilename := fmt.Sprintf("%d_%s", i, basename)
 		filenames = append(filenames, outfilename)
@@ -90,28 +97,38 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 		subfiles = append(subfiles, out)
 	}
 
+	// receive buffered lines from the input file
 	lines := make(chan []byte, n*2)
 	doneWrite := make(chan struct{})
 	start := time.Now()
+	// start round-robbin multiplexing of line -> subfiles, reading
+	// lines from the channel
 	go slicer.multiplexLines(lines, subfiles, doneWrite)
 
+	// start feeding lines to the line multiplexer
 	log.Printf("reading lines from %q (%s)", filename, humanize.Bytes(uint64(size)))
 	if err := readLines(inputfile, size, lines); err != nil {
 		el.Printf("reading lines from input failed: %v", err)
 	}
 	log.Printf("done reading lines in %v", time.Since(start))
 
+	// when all lines have been sent to subfiles, wait until they
+	// finish writing
 	<-doneWrite
 	log.Printf("done writing to subfiles in %v", time.Since(start))
 
 	return filenames, nil
 }
 
+// multipleLines receives []byte's and write them in a round-robbin fashion
+// to the subfiles. This is not optimal since writes to disk are not sequential
+// but it's simpler to reason about, and performance doesn't really matter.
 func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, done chan<- struct{}) {
 	defer close(done)
 	outIdx := 0
 	outMod := len(outputs)
 	for line := range lines {
+		// write the lines in a round robbin way
 		_, err := outputs[outIdx].Write(line)
 		if err != nil {
 			st.elog.Printf("couldn't write to output %d: %v", outIdx, err)
@@ -121,8 +138,13 @@ func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, don
 	}
 }
 
+// readLines from r, which contains gzip'd data in a line (\n) oriented
+// way. Each line of []byte is sent to the output `lines` channel
+// A progress bar is printed to stdout as the input file is read.
 func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	defer close(lines)
+	// wraps the reader with a progress bar, because it's convenient
+	// to know what's going on while the tool runs.
 	bar := pb.New(int(size))
 	bar.ShowBar = true
 	bar.ShowCounters = true
@@ -132,6 +154,7 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	bar.SetUnits(pb.U_BYTES)
 	barr := bar.NewProxyReader(r)
 
+	// gunzip the reader (proxied by the progress bar)
 	gr, err := gzip.NewReader(barr)
 	if err != nil {
 		return err
@@ -144,13 +167,18 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	defer bar.FinishPrint("all lines were read")
 	var total uint64
 	defer func() { log.Printf("total decompressed size %s", humanize.Bytes(total)) }()
+
+	// reads all the `\n` separated lines until EOF
 	for {
 		line, err := rd.ReadBytes('\n')
 		switch err {
-		case io.EOF:
-			return nil
 		case nil:
+			// no error, carry on
+		case io.EOF:
+			// done reading
+			return nil
 		default:
+			// not nil, not EOF, bail
 			return err
 		}
 		total += uint64(len(line) + 1)
@@ -158,7 +186,8 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 	}
 }
 
-func open(elog *log.Logger, filename string) (*os.File, int64, error) {
+// open a file and stat its size (in bytes).
+func open(filename string) (*os.File, int64, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, -1, fmt.Errorf("opening file %q: %v", filename, err)
