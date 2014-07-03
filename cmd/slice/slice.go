@@ -100,7 +100,7 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 	lines := make(chan []byte, n*2)
 	doneWrite := make(chan struct{})
 	start := time.Now()
-	// start round-robbin multiplexing of line -> subfiles, reading
+	// start round-robin multiplexing of line -> subfiles, reading
 	// lines from the channel
 	go slicer.multiplexLines(lines, subfiles, doneWrite)
 
@@ -119,7 +119,7 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 	return filenames, nil
 }
 
-// multipleLines receives []byte's and write them in a round-robbin fashion
+// multipleLines receives []byte's and write them in a round-robin fashion
 // to the subfiles. This is not optimal since writes to disk are not sequential
 // but it's simpler to reason about, and performance doesn't really matter.
 func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, done chan<- struct{}) {
@@ -127,7 +127,7 @@ func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, don
 	outIdx := 0
 	outMod := len(outputs)
 	for line := range lines {
-		// write the lines in a round robbin way
+		// write the lines in a round robin way
 		_, err := outputs[outIdx].Write(line)
 		if err != nil {
 			st.elog.Printf("couldn't write to output %d: %v", outIdx, err)
