@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
-	"github.com/bradfitz/iter"
 	"github.com/cheggaaa/pb"
 	"github.com/dustin/go-humanize"
 	"io"
@@ -87,7 +86,7 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 			}
 		}
 	}()
-	for i := range iter.N(n) {
+	for i := 0; i < n; i++ {
 		outfilename := fmt.Sprintf("%d_%s", i, basename)
 		filenames = append(filenames, outfilename)
 		out, err := newSubFile(outfilename)
