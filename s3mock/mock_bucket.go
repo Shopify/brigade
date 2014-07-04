@@ -68,6 +68,13 @@ func (m *MockS3) Seed(mockBkt MockBucket) *MockS3 {
 	return m
 }
 
+// SendErrors will start sending errors at a rate from 0.0 to 1.0,
+// where 1.0 means always send an error. The errors will start after
+// enough error-free calls have gone through.
+func (m *MockS3) SendErrors(afterCalls int, rate float64, errs []s3.Error) {
+	m.srv.SendErrors(afterCalls, rate, errs)
+}
+
 // MockBucket contains keys that are prepopulated
 type MockBucket struct {
 	name string

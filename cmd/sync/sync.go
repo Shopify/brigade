@@ -15,29 +15,31 @@ import (
 	"time"
 )
 
-var (
-	// BufferFactor of decode/sync channels,
-	// which are BufferFactor-times bigger than their
-	// parallelism.
-	BufferFactor = 10
-
+const (
 	targetP50 = 0.50
 	targetP95 = 0.95
-
-	q = struct{}{}
 
 	// PutCopy method of syncing buckets, the sync is done entirely within
 	// S3.
 	PutCopy = "putcopy"
 )
 
-var method = map[string]func(*s3.Bucket, *s3.Bucket, s3.Key) error{
+var (
+	q = struct{}{}
 
-	PutCopy: func(src, dst *s3.Bucket, key s3.Key) error {
-		_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
-		return err
-	},
-}
+	// BufferFactor of decode/sync channels,
+	// which are BufferFactor-times bigger than their
+	// parallelism.
+	BufferFactor = 10
+
+	method = map[string]func(*s3.Bucket, *s3.Bucket, s3.Key) error{
+
+		PutCopy: func(src, dst *s3.Bucket, key s3.Key) error {
+			_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
+			return err
+		},
+	}
+)
 
 // Options for bucket syncing.
 type Options struct {
@@ -52,7 +54,10 @@ type Options struct {
 
 func (o *Options) setDefaults() {
 	if o.MaxRetry <= 0 {
-		o.MaxRetry = 5
+		// will fail to retry ~9.8 times out of 10'000 if 50% of calls
+		// return retryable errors that would otherwise eventually
+		// have succeeded
+		o.MaxRetry = 10
 	}
 	if o.DecodePara <= 0 {
 		o.DecodePara = runtime.NumCPU()
@@ -67,7 +72,7 @@ func (o *Options) setDefaults() {
 
 // Sync creates and starts a sync task, reading all the keys that need to be sync'd
 // from the input reader, in JSON form, copying the keys in src onto dst.
-func Sync(el *log.Logger, input io.Reader, src, dst *s3.Bucket, opts Options) error {
+func Sync(el *log.Logger, input io.Reader, success, fail io.Writer, src, dst *s3.Bucket, opts Options) error {
 	opts.setDefaults()
 
 	// before starting the sync, make sure our s3 object is usable (credentials and such)
@@ -81,7 +86,7 @@ func Sync(el *log.Logger, input io.Reader, src, dst *s3.Bucket, opts Options) er
 		elog:     el,
 		src:      src,
 		dst:      dst,
-		qtstream: quantile.NewTargeted(targetP50, targetP95),
+		qtStream: quantile.NewTargeted(targetP50, targetP95),
 		opts:     opts,
 	}
 
@@ -91,7 +96,7 @@ func Sync(el *log.Logger, input io.Reader, src, dst *s3.Bucket, opts Options) er
 		task.syncMethod = method[PutCopy]
 	}
 
-	return task.Start(input)
+	return task.Start(input, success, fail)
 }
 
 type syncTask struct {
@@ -100,27 +105,30 @@ type syncTask struct {
 	src *s3.Bucket
 	dst *s3.Bucket
 
-	qtstreamL sync.Mutex
-	qtstream  *quantile.Stream
+	qtStreamL sync.Mutex
+	qtStream  *quantile.Stream
 
 	syncMethod func(src, dst *s3.Bucket, key s3.Key) error
 
 	opts Options
 
 	// shared stats between goroutines, use sync/atomic
-	filelines   int64
+	fileLines   int64
 	decodedKeys int64
 	syncedKeys  int64
 	inflight    int64
 }
 
-func (s *syncTask) Start(input io.Reader) error {
+func (s *syncTask) Start(input io.Reader, synced, failed io.Writer) error {
 	start := time.Now()
 
 	ticker := time.NewTicker(time.Second)
 	go s.printProgress(ticker)
 
-	keys := make(chan s3.Key, s.opts.SyncPara*BufferFactor)
+	keysIn := make(chan s3.Key, s.opts.SyncPara*BufferFactor)
+	keysOk := make(chan s3.Key, s.opts.SyncPara*BufferFactor)
+	keysFail := make(chan s3.Key, s.opts.SyncPara*BufferFactor)
+
 	decoders := make(chan []byte, s.opts.DecodePara*BufferFactor)
 
 	// start JSON decoders
@@ -128,16 +136,23 @@ func (s *syncTask) Start(input io.Reader) error {
 	decGroup := sync.WaitGroup{}
 	for i := 0; i < s.opts.DecodePara; i++ {
 		decGroup.Add(1)
-		go s.decode(&decGroup, decoders, keys)
+		go s.decode(&decGroup, decoders, keysIn)
 	}
 
 	// start S3 sync workers
-	log.Printf("starting %d key sync workers, buffer size %d", s.opts.SyncPara, cap(keys))
+	log.Printf("starting %d key sync workers, buffer size %d", s.opts.SyncPara, cap(keysIn))
 	syncGroup := sync.WaitGroup{}
 	for i := 0; i < s.opts.SyncPara; i++ {
 		syncGroup.Add(1)
-		go s.syncKey(&syncGroup, s.src, s.dst, keys)
+		go s.syncKey(&syncGroup, s.src, s.dst, keysIn, keysOk, keysFail)
 	}
+
+	// track keys that have been sync'd, and those that we failed to sync.
+	log.Printf("starting to write progress")
+	encGroup := sync.WaitGroup{}
+	encGroup.Add(2)
+	go s.encode(&encGroup, synced, keysOk)
+	go s.encode(&encGroup, failed, keysFail)
 
 	// feed the pipeline by reading the listing file
 	log.Printf("starting to read key listing file")
@@ -146,7 +161,7 @@ func (s *syncTask) Start(input io.Reader) error {
 	// when done reading the source file, wait until the decoders
 	// are done.
 	log.Printf("done reading %s lines in %v",
-		humanize.Comma(atomic.LoadInt64(&s.filelines)),
+		humanize.Comma(atomic.LoadInt64(&s.fileLines)),
 		time.Since(start))
 	close(decoders)
 	decGroup.Wait()
@@ -156,8 +171,14 @@ func (s *syncTask) Start(input io.Reader) error {
 		humanize.Comma(atomic.LoadInt64(&s.decodedKeys)),
 		time.Since(start))
 
-	close(keys)
+	close(keysIn)
 	syncGroup.Wait()
+
+	close(keysOk)
+	close(keysFail)
+
+	encGroup.Wait()
+
 	ticker.Stop()
 
 	// the source file is read, all keys were decoded and sync'd. we're done.
@@ -172,13 +193,13 @@ func (s *syncTask) Start(input io.Reader) error {
 // and how the tool performs.
 func (s *syncTask) printProgress(tick *time.Ticker) {
 	for _ = range tick.C {
-		s.qtstreamL.Lock()
-		p50, p95 := s.qtstream.Query(targetP50), s.qtstream.Query(targetP95)
-		s.qtstream.Reset()
-		s.qtstreamL.Unlock()
+		s.qtStreamL.Lock()
+		p50, p95 := s.qtStream.Query(targetP50), s.qtStream.Query(targetP95)
+		s.qtStream.Reset()
+		s.qtStreamL.Unlock()
 
-		log.Printf("filelines=%s\tdecodedKeys=%s\tsyncedKeys=%s\tinflight=%d/%d\tsync-p50=%v\tsync-p95=%v",
-			humanize.Comma(s.filelines),
+		log.Printf("fileLines=%s\tdecodedKeys=%s\tsyncedKeys=%s\tinflight=%d/%d\tsync-p50=%v\tsync-p95=%v",
+			humanize.Comma(s.fileLines),
 			humanize.Comma(s.decodedKeys),
 			humanize.Comma(s.syncedKeys),
 			atomic.LoadInt64(&s.inflight), s.opts.SyncPara,
@@ -188,7 +209,8 @@ func (s *syncTask) printProgress(tick *time.Ticker) {
 	}
 }
 
-// reads all the \n separated lines from a file
+// reads all the \n separated lines from a file, write them (without \n) to
+// the channel. reads until EOF or stops on the first error encountered
 func (s *syncTask) readLines(input io.Reader, decoders chan<- []byte) error {
 
 	rd := bufio.NewReader(input)
@@ -204,7 +226,7 @@ func (s *syncTask) readLines(input io.Reader, decoders chan<- []byte) error {
 		}
 
 		decoders <- line
-		atomic.AddInt64(&s.filelines, 1)
+		atomic.AddInt64(&s.fileLines, 1)
 	}
 }
 
@@ -223,11 +245,27 @@ func (s *syncTask) decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- s
 	}
 }
 
-func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan s3.Key) {
+// encode write the keys it receives in JSON to a dst writer.
+func (s *syncTask) encode(wg *sync.WaitGroup, dst io.Writer, keys <-chan s3.Key) {
+	defer wg.Done()
+	enc := json.NewEncoder(dst)
+	for key := range keys {
+		err := enc.Encode(key)
+		if err != nil {
+			s.elog.Fatalf("encoding %q to JSON: %v", key.Key, err)
+		}
+	}
+}
+
+// syncKey uses s.syncMethod to copy keys from `src` to `dst`, until `keys` is
+// closed. Each key error is retried MaxRetry times, unless the error is not
+// retryable.
+func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan s3.Key, synced, failed chan<- s3.Key) {
 	defer wg.Done()
 
 	var err error
 	for key := range keys {
+		// `retry` is used outside the loop, starts at 1
 		retry := 1
 	retrying:
 		for ; retry <= s.opts.MaxRetry; retry++ {
@@ -238,9 +276,9 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan 
 			atomic.AddInt64(&s.inflight, 1)
 			err = s.syncMethod(src, dst, key)
 			atomic.AddInt64(&s.inflight, -1)
-			s.qtstreamL.Lock()
-			s.qtstream.Insert(float64(time.Since(start).Nanoseconds()))
-			s.qtstreamL.Unlock()
+			s.qtStreamL.Lock()
+			s.qtStream.Insert(float64(time.Since(start).Nanoseconds()))
+			s.qtStreamL.Unlock()
 
 			switch e := err.(type) {
 			case nil:
@@ -250,7 +288,7 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan 
 				// if the error is specific to S3, we can do smart stuff like
 				if shouldAbort(e) {
 					// abort if its an error that will occur for all future calls
-					// such as bad auth, or the bucket not existing anymore
+					// such as bad auth, or the bucket not existing anymore (that'd be bad!)
 					s.elog.Fatalf("abort-worthy-error=%q\terror-msg=%q\tkey=%#v", e.Code, e.Message, key)
 				}
 				if !shouldRetry(e) {
@@ -274,8 +312,9 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan 
 
 		}
 
-		// If we exhausted MaxRetry, log the error to the output
+		// If we exhausted MaxRetry, log the error to the error log
 		if err != nil {
+			failed <- key
 			s.elog.Printf("failed %d times to sync %q", retry, key.Key)
 			switch e := err.(type) {
 			case *s3.Error:
@@ -289,6 +328,7 @@ func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan 
 			continue
 		}
 
+		synced <- key
 		atomic.AddInt64(&s.syncedKeys, 1)
 	}
 }
