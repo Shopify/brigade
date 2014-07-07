@@ -53,16 +53,16 @@ type Options struct {
 }
 
 func (o *Options) setDefaults() {
-	if o.MaxRetry <= 0 {
+	if o.MaxRetry == 0 { // will panic if negative
 		// will fail to retry ~9.8 times out of 10'000 if 50% of calls
 		// return retryable errors that would otherwise eventually
 		// have succeeded
 		o.MaxRetry = 10
 	}
-	if o.DecodePara <= 0 {
+	if o.DecodePara == 0 { // will panic if negative
 		o.DecodePara = runtime.NumCPU()
 	}
-	if o.SyncPara <= 0 {
+	if o.SyncPara == 0 { // will panic if negative
 		o.DecodePara = 200
 	}
 	if o.RetryBase == time.Duration(0) {
