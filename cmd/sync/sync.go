@@ -199,9 +199,9 @@ func (s *syncTask) printProgress(tick *time.Ticker) {
 		s.qtStreamL.Unlock()
 
 		log.Printf("fileLines=%s\tdecodedKeys=%s\tsyncedKeys=%s\tinflight=%d/%d\tsync-p50=%v\tsync-p95=%v",
-			humanize.Comma(s.fileLines),
-			humanize.Comma(s.decodedKeys),
-			humanize.Comma(s.syncedKeys),
+			humanize.Comma(atomic.LoadInt64(&s.fileLines)),
+			humanize.Comma(atomic.LoadInt64(&s.decodedKeys)),
+			humanize.Comma(atomic.LoadInt64(&s.syncedKeys)),
 			atomic.LoadInt64(&s.inflight), s.opts.SyncPara,
 			time.Duration(p50),
 			time.Duration(p95),
