@@ -55,7 +55,7 @@ type Options struct {
 func (o *Options) setDefaults() {
 	if o.MaxRetry == 0 { // will panic if negative
 		// will fail to retry ~9.8 times out of 10'000 if 50% of calls
-		// return retryable errors that would otherwise eventually
+		// return retriable errors that would otherwise eventually
 		// have succeeded
 		o.MaxRetry = 10
 	}
@@ -259,78 +259,81 @@ func (s *syncTask) encode(wg *sync.WaitGroup, dst io.Writer, keys <-chan s3.Key)
 
 // syncKey uses s.syncMethod to copy keys from `src` to `dst`, until `keys` is
 // closed. Each key error is retried MaxRetry times, unless the error is not
-// retryable.
+// retriable.
 func (s *syncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan s3.Key, synced, failed chan<- s3.Key) {
 	defer wg.Done()
 
-	var err error
 	for key := range keys {
-		// `retry` is used outside the loop, starts at 1
-		retry := 1
-	retrying:
-		for ; retry <= s.opts.MaxRetry; retry++ {
-			start := time.Now()
-
-			// do a put copy call (sync directly from bucket to another
-			// without fetching the content locally)
-			atomic.AddInt64(&s.inflight, 1)
-			err = s.syncMethod(src, dst, key)
-			atomic.AddInt64(&s.inflight, -1)
-			s.qtStreamL.Lock()
-			s.qtStream.Insert(float64(time.Since(start).Nanoseconds()))
-			s.qtStreamL.Unlock()
-
-			switch e := err.(type) {
-			case nil:
-				// when there are no errors, there's nothing to retry
-				break retrying
-			case *s3.Error:
-				// if the error is specific to S3, we can do smart stuff like
-				if shouldAbort(e) {
-					// abort if its an error that will occur for all future calls
-					// such as bad auth, or the bucket not existing anymore (that'd be bad!)
-					s.elog.Fatalf("abort-worthy-error=%q\terror-msg=%q\tkey=%#v", e.Code, e.Message, key)
-				}
-				if !shouldRetry(e) {
-					// give up on that key if it's not retryable, such as a key
-					// that was deleted
-					s.elog.Printf("unretriable-error=%q\terror-msg=%q\tkey=%q", e.Code, e.Message, key.Key)
-					break retrying
-				}
-				// carry on to retry
-			default:
-				// carry on to retry
-			}
-
-			// log that we sleep, but don't log the error itself just
-			// yet (to avoid logging transient network errors that are
-			// recovered by retrying)
-			sleepFor := s.opts.RetryBase * time.Duration(retry)
-			s.elog.Printf("worker-sleep-on-retryiable-error=%v", sleepFor)
-			time.Sleep(sleepFor)
-			s.elog.Printf("worker-wake-up, retries=%d/%d", retry, s.opts.MaxRetry)
-
-		}
-
+		retries, err := s.syncOrRetry(src, dst, key)
 		// If we exhausted MaxRetry, log the error to the error log
 		if err != nil {
 			failed <- key
-			s.elog.Printf("failed %d times to sync %q", retry, key.Key)
+
+			s.elog.Printf("failed %d times to sync %q", retries, key.Key)
 			switch e := err.(type) {
-			case *s3.Error:
-				if shouldAbort(e) {
-					s.elog.Fatalf("abort-worthy-error=%#v\tkey=%#v", e, key)
-				}
+			case *s3.Error: // cannot be abort worthy at this point
 				s.elog.Printf("s3-error-code=%q\ts3-error-msg=%q\tkey=%q", e.Code, e.Message, key.Key)
 			default:
 				s.elog.Printf("other-error=%#v\tkey=%q", e, key.Key)
 			}
-			continue
+
+		} else {
+			synced <- key
+			atomic.AddInt64(&s.syncedKeys, 1)
+		}
+	}
+}
+
+// syncOrRetry will try to sync a key many times, until it succeeds or
+// fail more than MaxRetry times. It will sleep between retries and abort
+// the program on errors that are unrecoverable (like bad auths).
+func (s *syncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
+	var err error
+	retry := 1
+	for ; retry <= s.opts.MaxRetry; retry++ {
+		start := time.Now()
+
+		// do a put copy call (sync directly from bucket to another
+		// without fetching the content locally)
+		atomic.AddInt64(&s.inflight, 1)
+		err = s.syncMethod(src, dst, key)
+		atomic.AddInt64(&s.inflight, -1)
+		s.qtStreamL.Lock()
+		s.qtStream.Insert(float64(time.Since(start).Nanoseconds()))
+		s.qtStreamL.Unlock()
+
+		switch e := err.(type) {
+		case nil:
+			// when there are no errors, there's nothing to retry
+			return retry, nil
+		case *s3.Error:
+			// if the error is specific to S3, we can do smart stuff like
+			if shouldAbort(e) {
+				// abort if its an error that will occur for all future calls
+				// such as bad auth, or the bucket not existing anymore (that'd be bad!)
+				s.elog.Fatalf("abort-worthy-error=%q\terror-msg=%q\tkey=%#v", e.Code, e.Message, key)
+			}
+			if !shouldRetry(e) {
+				// give up on that key if it's not retriable, such as a key
+				// that was deleted
+				s.elog.Printf("unretriable-error=%q\terror-msg=%q\tkey=%q", e.Code, e.Message, key.Key)
+				return retry, e
+			}
+			// carry on to retry
+		default:
+			// carry on to retry
 		}
 
-		synced <- key
-		atomic.AddInt64(&s.syncedKeys, 1)
+		// log that we sleep, but don't log the error itself just
+		// yet (to avoid logging transient network errors that are
+		// recovered by retrying)
+		sleepFor := s.opts.RetryBase * time.Duration(retry)
+		s.elog.Printf("worker-sleep-on-retryiable-error=%v", sleepFor)
+		time.Sleep(sleepFor)
+		s.elog.Printf("worker-wake-up, retries=%d/%d", retry, s.opts.MaxRetry)
+
 	}
+	return retry, err
 }
 
 // Classify S3 errors that should be retried.
