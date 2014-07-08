@@ -160,16 +160,16 @@ func (s *syncTask) Start(input io.Reader, synced, failed io.Writer) error {
 
 	// when done reading the source file, wait until the decoders
 	// are done.
-	log.Printf("done reading %s lines in %v",
-		humanize.Comma(atomic.LoadInt64(&s.fileLines)),
-		time.Since(start))
+	log.Printf("%v: done reading %s lines",
+		time.Since(start),
+		humanize.Comma(atomic.LoadInt64(&s.fileLines)))
 	close(decoders)
 	decGroup.Wait()
 
 	// when the decoders are all done, wait for the sync workers to finish
-	log.Printf("done decoding %s keys in %v",
-		humanize.Comma(atomic.LoadInt64(&s.decodedKeys)),
-		time.Since(start))
+	log.Printf("%v: done decoding %s keys",
+		time.Since(start),
+		humanize.Comma(atomic.LoadInt64(&s.decodedKeys)))
 
 	close(keysIn)
 	syncGroup.Wait()
@@ -182,9 +182,9 @@ func (s *syncTask) Start(input io.Reader, synced, failed io.Writer) error {
 	ticker.Stop()
 
 	// the source file is read, all keys were decoded and sync'd. we're done.
-	log.Printf("done syncing %s keys in %v",
-		humanize.Comma(atomic.LoadInt64(&s.syncedKeys)),
-		time.Since(start))
+	log.Printf("%v: done syncing %s keys",
+		time.Since(start),
+		humanize.Comma(atomic.LoadInt64(&s.syncedKeys)))
 
 	return err
 }
