@@ -33,11 +33,14 @@ func TestCanSync(t *testing.T) {
 	var synced bytes.Buffer
 	var failed bytes.Buffer
 
-	err := sync.Sync(testlogger(t), input, &synced, &failed, src, dst, sync.Options{
-		DecodePara: 3,
-		SyncPara:   3,
-		RetryBase:  time.Millisecond,
-	})
+	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	if err != nil {
+		t.Fatalf("can't create sync task: %v", err)
+	}
+	syncTask.DecodePara = 3
+	syncTask.SyncPara = 3
+	syncTask.RetryBase = time.Millisecond
+	err = syncTask.Start(input, &synced, &failed)
 	if err != nil {
 		t.Fatalf("can't sync: %v", err)
 	}
@@ -101,7 +104,7 @@ func TestSyncRecordsError(t *testing.T) {
 	var failed bytes.Buffer
 
 	mocks3.SendErrors(
-		1,   // send errors after 1 call (list bucket)
+		2,   // send errors after 2 call (list bucket both buckets)
 		1.0, // errors 100% of requests to S3
 		[]s3.Error{
 			{Message: s3.ErrInternalError},
@@ -109,11 +112,14 @@ func TestSyncRecordsError(t *testing.T) {
 			{Message: s3.ErrServiceUnavailable},
 		})
 
-	err := sync.Sync(testlogger(t), input, &synced, &failed, src, dst, sync.Options{
-		DecodePara: 3,
-		SyncPara:   3,
-		RetryBase:  time.Millisecond,
-	})
+	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	if err != nil {
+		t.Fatalf("can't create sync task: %v", err)
+	}
+	syncTask.DecodePara = 3
+	syncTask.SyncPara = 3
+	syncTask.RetryBase = time.Millisecond
+	err = syncTask.Start(input, &synced, &failed)
 	if err != nil {
 		t.Fatalf("can't sync: %v", err)
 	}
@@ -179,7 +185,7 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 	var failed bytes.Buffer
 
 	mocks3.SendErrors(
-		1,    // send errors after 1 call (list bucket)
+		2,    // send errors after 2 call (list bucket both buckets)
 		0.50, // 50% of requests to S3 return errors
 		[]s3.Error{
 			{Message: s3.ErrInternalError},
@@ -187,11 +193,14 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 			{Message: s3.ErrServiceUnavailable},
 		})
 
-	err := sync.Sync(testlogger(t), input, &synced, &failed, src, dst, sync.Options{
-		DecodePara: 3,
-		SyncPara:   3,
-		RetryBase:  time.Microsecond * 500,
-	})
+	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	if err != nil {
+		t.Fatalf("can't create sync task: %v", err)
+	}
+	syncTask.DecodePara = 3
+	syncTask.SyncPara = 3
+	syncTask.RetryBase = time.Microsecond * 500
+	err = syncTask.Start(input, &synced, &failed)
 	if err != nil {
 		t.Fatalf("can't sync: %v", err)
 	}
