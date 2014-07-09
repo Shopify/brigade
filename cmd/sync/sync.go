@@ -18,10 +18,6 @@ import (
 const (
 	targetP50 = 0.50
 	targetP95 = 0.95
-
-	// PutCopy method of syncing buckets, the sync is done entirely within
-	// S3.
-	PutCopy = "putcopy"
 )
 
 var (
@@ -31,15 +27,10 @@ var (
 	// which are BufferFactor-times bigger than their
 	// parallelism.
 	BufferFactor = 10
-
-	method = map[string]func(*s3.Bucket, *s3.Bucket, s3.Key) error{
-
-		PutCopy: func(src, dst *s3.Bucket, key s3.Key) error {
-			_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
-			return err
-		},
-	}
 )
+
+// SyncerFunc syncs an s3.Key from a source to a destination bucket.
+type SyncerFunc func(src *s3.Bucket, dst *s3.Bucket, key s3.Key) error
 
 // Options for bucket syncing.
 type Options struct {
@@ -49,7 +40,7 @@ type Options struct {
 	DecodePara int
 	SyncPara   int
 
-	MethodName string
+	Sync SyncerFunc
 }
 
 func (o *Options) setDefaults() {
@@ -63,10 +54,17 @@ func (o *Options) setDefaults() {
 		o.DecodePara = runtime.NumCPU()
 	}
 	if o.SyncPara == 0 { // will panic if negative
-		o.DecodePara = 200
+		o.SyncPara = 200
 	}
 	if o.RetryBase == time.Duration(0) {
 		o.RetryBase = time.Second
+	}
+
+	if o.Sync == nil {
+		o.Sync = func(src, dst *s3.Bucket, key s3.Key) error {
+			_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
+			return err
+		}
 	}
 }
 
@@ -88,12 +86,6 @@ func Sync(el *log.Logger, input io.Reader, success, fail io.Writer, src, dst *s3
 		dst:      dst,
 		qtStream: quantile.NewTargeted(targetP50, targetP95),
 		opts:     opts,
-	}
-
-	if syncMethod, ok := method[opts.MethodName]; ok {
-		task.syncMethod = syncMethod
-	} else {
-		task.syncMethod = method[PutCopy]
 	}
 
 	return task.Start(input, success, fail)
@@ -296,7 +288,7 @@ func (s *syncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
 		// do a put copy call (sync directly from bucket to another
 		// without fetching the content locally)
 		atomic.AddInt64(&s.inflight, 1)
-		err = s.syncMethod(src, dst, key)
+		err = s.opts.Sync(src, dst, key)
 		atomic.AddInt64(&s.inflight, -1)
 		s.qtStreamL.Lock()
 		s.qtStream.Insert(float64(time.Since(start).Nanoseconds()))
