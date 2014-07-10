@@ -234,12 +234,8 @@ func syncCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 
 		// tracking the progress in reading the file helps tracking
 		// how far in the sync process we are.
-		bar := pb.New(int(fi.Size()))
-		bar.ShowBar = true
-		bar.ShowCounters = true
-		bar.ShowPercent = true
+		bar := pb.New64(fi.Size())
 		bar.ShowSpeed = true
-		bar.ShowTimeLeft = true
 		bar.SetUnits(pb.U_BYTES)
 		barr := bar.NewProxyReader(listfile)
 
