@@ -243,6 +243,7 @@ func syncCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 		if err != nil {
 			elog.Printf("listing file is not a gzip file: %v", err)
 			cli.ShowCommandHelp(c, c.Command.Name)
+			return
 		}
 		defer func() { lognotnil(inputGzRd.Close()) }()
 
@@ -352,7 +353,6 @@ func diffCommand() ([]cli.Flag, func(*cli.Context)) {
 		dstf, err := os.Create(dstfile)
 		if err != nil {
 			elog.Fatalf("couldn't create destination file %q: %v", dstfile, err)
-			return
 		}
 		defer func() { lognotnil(dstf.Close()) }()
 
