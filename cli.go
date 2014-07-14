@@ -17,6 +17,8 @@ import (
 	"strings"
 )
 
+var version = "0.0.1"
+
 // Those are set by the `GOLDFLAGS` in the Makefile.
 var branch, commit string
 
@@ -24,7 +26,7 @@ func newApp(auth aws.Auth) *cli.App {
 	app := cli.NewApp()
 	app.Name = "brigade"
 	app.Usage = "Toolkit to list and sync S3 buckets."
-	app.Version = fmt.Sprintf("0.0.1 (%s, %s)", branch, commit)
+	app.Version = fmt.Sprintf("%s (%s, %s)", version, branch, commit)
 
 	listFlag, listAction := listCommand(auth)
 	syncFlag, syncAction := syncCommand(auth)
