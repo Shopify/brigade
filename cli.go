@@ -17,6 +17,7 @@ import (
 	"strings"
 )
 
+// Those are set by the `GOLDFLAGS` in the Makefile.
 var branch, commit string
 
 func newApp(auth aws.Auth) *cli.App {
