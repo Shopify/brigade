@@ -57,12 +57,10 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 		Flags: []cli.Flag{bktFlag, dstFlag, regionFlag, dedupFlag},
 		Action: func(c *cli.Context) {
 
-			var (
-				bkt        = c.String(bktFlag.Name)
-				dst        = c.String(dstFlag.Name)
-				regionName = c.String(regionFlag.Name)
-				dedup      = c.Bool(dedupFlag.Name)
-			)
+			bkt := c.String(bktFlag.Name)
+			dst := c.String(dstFlag.Name)
+			regionName := c.String(regionFlag.Name)
+			dedup := c.Bool(dedupFlag.Name)
 
 			region, validRegion := aws.Regions[regionName]
 
@@ -122,15 +120,13 @@ bucket to a destination bucket.`),
 		Flags: []cli.Flag{inputFlag, successFlag, failureFlag, srcFlag, dstFlag, regionFlag, concurrencyFlag},
 		Action: func(c *cli.Context) {
 
-			var (
-				inputFilename   = c.String(inputFlag.Name)
-				successFilename = c.String(successFlag.Name)
-				failureFilename = c.String(failureFlag.Name)
-				src             = c.String(srcFlag.Name)
-				dst             = c.String(dstFlag.Name)
-				regionName      = c.String(regionFlag.Name)
-				conc            = c.Int(concurrencyFlag.Name)
-			)
+			inputFilename := c.String(inputFlag.Name)
+			successFilename := c.String(successFlag.Name)
+			failureFilename := c.String(failureFlag.Name)
+			src := c.String(srcFlag.Name)
+			dst := c.String(dstFlag.Name)
+			regionName := c.String(regionFlag.Name)
+			conc := c.Int(concurrencyFlag.Name)
 
 			srcU, srcErr := url.Parse(src)
 			dstU, dstErr := url.Parse(dst)
@@ -269,10 +265,8 @@ Will produce the files:
 		Flags: []cli.Flag{nFlag, filenameFlag},
 		Action: func(c *cli.Context) {
 
-			var (
-				n        = c.Int(nFlag.Name)
-				filename = c.String(filenameFlag.Name)
-			)
+			n := c.Int(nFlag.Name)
+			filename := c.String(filenameFlag.Name)
 
 			hadError := true
 			switch {
@@ -316,11 +310,9 @@ in the new listing and generates a new files containing only those keys.`),
 		Flags: []cli.Flag{oldfileFlag, newfileFlag, dstfileFlag},
 		Action: func(c *cli.Context) {
 
-			var (
-				oldfile = c.String(oldfileFlag.Name)
-				newfile = c.String(newfileFlag.Name)
-				dstfile = c.String(dstfileFlag.Name)
-			)
+			oldfile := c.String(oldfileFlag.Name)
+			newfile := c.String(newfileFlag.Name)
+			dstfile := c.String(dstfileFlag.Name)
 
 			hadError := true
 			switch {
