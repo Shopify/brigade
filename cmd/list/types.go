@@ -1,6 +1,7 @@
 package list
 
 import (
+	"expvar"
 	"github.com/aybabtme/goamz/s3"
 	"path"
 	"sync/atomic"
@@ -9,24 +10,53 @@ import (
 
 // Collections
 
-type lifoJobs struct{ stack []*Job }
+type lifoJobs struct {
+	exp   *expvar.Int
+	stack []*Job
+}
+
+func newLifoJob(exp *expvar.Int) *lifoJobs {
+	return &lifoJobs{exp: exp}
+}
 
 func (l *lifoJobs) IsEmpty() bool { return len(l.stack) == 0 }
 func (l *lifoJobs) Len() int      { return len(l.stack) }
-func (l *lifoJobs) Add(job *Job)  { l.stack = append(l.stack, job) }
 func (l *lifoJobs) Peek() *Job    { return l.stack[len(l.stack)-1] }
+func (l *lifoJobs) Add(job *Job) {
+	l.stack = append(l.stack, job)
+	l.exp.Add(1)
+}
 func (l *lifoJobs) Remove() *Job {
 	item := l.stack[len(l.stack)-1]
 	l.stack = l.stack[:len(l.stack)-1]
+	l.exp.Add(-1)
 	return item
 }
 
-type jobSet map[uint64]struct{}
+type jobSet struct {
+	exp *expvar.Int
+	set map[uint64]struct{}
+}
 
-func (j jobSet) Contains(job *Job) bool { _, ok := j[job.id]; return ok }
-func (j jobSet) IsEmpty() bool          { return len(j) == 0 }
-func (j jobSet) Add(job *Job)           { j[job.id] = struct{}{} }
-func (j jobSet) Delete(job *Job)        { delete(j, job.id) }
+func newSet(exp *expvar.Int) *jobSet {
+	return &jobSet{
+		exp: exp,
+		set: make(map[uint64]struct{}),
+	}
+}
+
+func (j jobSet) Contains(job *Job) bool { _, ok := j.set[job.id]; return ok }
+func (j jobSet) IsEmpty() bool          { return len(j.set) == 0 }
+
+func (j jobSet) Add(job *Job) {
+	j.set[job.id] = struct{}{}
+	j.exp.Add(1)
+}
+
+func (j jobSet) Delete(job *Job) {
+	delete(j.set, job.id)
+	j.exp.Add(-1)
+}
 
 // Job holds the state of visiting an path in S3. This state includes
 // the last error, the number of retries left, the duration of the

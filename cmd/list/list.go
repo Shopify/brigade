@@ -85,26 +85,26 @@ var metrics = struct {
 	totalKeys       *expvar.Int
 	totalBucketSize *expvar.Int
 
-	inflight      *expvar.Int
-	timeWaitingS3 *expvar.Float
+	inflight         *expvar.Int
+	secondsWaitingS3 *expvar.Float
 
 	jobsAttempted *expvar.Int
 	jobsOk        *expvar.Int
 	jobsRescued   *expvar.Int
-	jobsAbandon   *expvar.Int
+	jobsAbandoned *expvar.Int
 }{
-	workToDo:        expvar.NewInt("workToDo"),
-	followers:       expvar.NewInt("followers"),
-	totalKeys:       expvar.NewInt("totalKeys"),
-	totalBucketSize: expvar.NewInt("totalBucketSize"),
+	workToDo:        expvar.NewInt("brigade.list.workToDo"),
+	followers:       expvar.NewInt("brigade.list.followers"),
+	totalKeys:       expvar.NewInt("brigade.list.totalKeys"),
+	totalBucketSize: expvar.NewInt("brigade.list.totalBucketSize"),
 
-	inflight:      expvar.NewInt("inflight"),
-	timeWaitingS3: expvar.NewFloat("timeWaitingS3"),
+	inflight:         expvar.NewInt("brigade.list.inflight"),
+	secondsWaitingS3: expvar.NewFloat("brigade.list.secondsWaitingS3"),
 
-	jobsAttempted: expvar.NewInt("jobsAttempted"),
-	jobsOk:        expvar.NewInt("jobsOk"),
-	jobsRescued:   expvar.NewInt("jobsRescued"),
-	jobsAbandon:   expvar.NewInt("jobsAbandon"),
+	jobsAttempted: expvar.NewInt("brigade.list.jobsAttempted"),
+	jobsOk:        expvar.NewInt("brigade.list.jobsOk"),
+	jobsRescued:   expvar.NewInt("brigade.list.jobsRescued"),
+	jobsAbandoned: expvar.NewInt("brigade.list.jobsAbandoned"),
 }
 
 // List an s3 bucket and write the keys in JSON form to dst. If dedup, will
@@ -121,6 +121,7 @@ func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) err
 	// Start a key encoder, which writes to the file concurrently
 	encDone := make(chan struct{})
 	go func(w io.Writer) {
+		log.Printf("start encoding keys to dst file")
 		defer close(encDone)
 		enc := json.NewEncoder(w)
 		for k := range keys {
@@ -128,13 +129,16 @@ func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) err
 				el.Fatalf("Couldn't encode key %q: %v", k.Key, err)
 			}
 		}
+		log.Printf("done encoding keys to dst file")
 	}(dst)
 
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
+	log.Printf("starting the listing of all keys in %q, dedup=%v", srcU.String(), dedup)
 	lister := listTask{elog: el}
 	err := lister.listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
+	log.Printf("done listing, waiting for key encoder to finish")
 	close(keys)
 	<-encDone
 	if err != nil {
@@ -166,9 +170,9 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
-	followers := &lifoJobs{}
+	followers := newLifoJob(metrics.followers)
 	visited := make(map[string]struct{})
-	workSet := make(jobSet)
+	workSet := newSet(metrics.workToDo)
 
 	firstJob := newJob(root)
 
@@ -204,10 +208,9 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 		workSet.Delete(doneJob)
 
 		// track some metrics
-		metrics.workToDo.Set(int64(len(workSet)))
-		metrics.followers.Set(int64(followers.Len()))
+
 		metrics.jobsAttempted.Add(1)
-		metrics.timeWaitingS3.Add(doneJob.duration.Seconds())
+		metrics.secondsWaitingS3.Add(doneJob.duration.Seconds())
 
 		// if the job was in error, maybe try to reenqueue it
 		if doneJob.err != nil {
@@ -218,7 +221,7 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 				followers.Add(doneJob)
 				workSet.Add(doneJob)
 			} else {
-				metrics.jobsAbandon.Add(1)
+				metrics.jobsAbandoned.Add(1)
 				l.elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
 			}
 			continue
@@ -267,7 +270,7 @@ func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, vi
 	}
 }
 
-func (l *listTask) jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visited map[string]struct{}) []*Job {
+func (l *listTask) jobsFromFollowers(newFollowers []string, workset *jobSet, dedup bool, visited map[string]struct{}) []*Job {
 	var newJobs []*Job
 	for _, follow := range newFollowers {
 		// prepare a new job, add it to the worker set and
