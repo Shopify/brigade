@@ -42,8 +42,8 @@ func newApp(auth aws.Auth) *cli.App {
 func listCommand(auth aws.Auth) cli.Command {
 
 	var (
-		bktFlag    = cli.StringFlag{Name: "bkt", Value: "", Usage: "path to bucket to list, of the form s3://name/path/"}
-		dstFlag    = cli.StringFlag{Name: "dst", Value: "bucket_list.json.gz", Usage: "filename to which the list of keys is saved"}
+		bucketFlag = cli.StringFlag{Name: "bucket", Value: "", Usage: "path to bucket to list, of the form s3://name/path/"}
+		dstFlag    = cli.StringFlag{Name: "dest", Value: "bucket_list.json.gz", Usage: "filename to which the list of keys is saved"}
 		regionFlag = cli.StringFlag{Name: "aws-region", Value: aws.USEast.Name, Usage: "AWS region where the bucket lives"}
 		dedupFlag  = cli.BoolFlag{Name: "dedup", Usage: "deduplicate jobs and keys, consumes much more memory"}
 	)
@@ -54,11 +54,11 @@ func listCommand(auth aws.Auth) cli.Command {
 		Description: strings.TrimSpace(`
 Do a traversal of the S3 bucket using many concurrent workers. The result of
 traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
-		Flags: []cli.Flag{bktFlag, dstFlag, regionFlag, dedupFlag},
+		Flags: []cli.Flag{bucketFlag, dstFlag, regionFlag, dedupFlag},
 		Action: func(c *cli.Context) {
 
-			bkt := c.String(bktFlag.Name)
-			dst := c.String(dstFlag.Name)
+			bucket := c.String(bucketFlag.Name)
+			dest := c.String(dstFlag.Name)
 			regionName := c.String(regionFlag.Name)
 			dedup := c.Bool(dedupFlag.Name)
 
@@ -66,18 +66,18 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 
 			hadError := true
 
-			file, dsterr := os.Create(dst)
+			file, dsterr := os.Create(dest)
 			if dsterr == nil {
 				defer func() { logIfErr(file.Close()) }()
 			}
 
 			switch {
-			case bkt == "":
-				elog.Printf("invalid bucket name: %q", bkt)
+			case bucket == "":
+				elog.Printf("invalid bucket name: %q", bucket)
 			case !validRegion:
 				elog.Printf("invalid aws-region: %q", regionName)
 			case dsterr != nil:
-				elog.Printf("couldn't create %q: %v", dst, dsterr)
+				elog.Printf("couldn't create %q: %v", dest, dsterr)
 			default:
 				hadError = false
 			}
@@ -92,7 +92,7 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 			log.Printf("starting command %q", c.Command.Name)
 			log.Printf("args=%v", os.Args)
 
-			err := list.List(elog, s3.New(auth, region), bkt, gw, dedup)
+			err := list.List(elog, s3.New(auth, region), bucket, gw, dedup)
 			if err != nil {
 				elog.Printf("failed to list bucket: %v", err)
 			}
@@ -106,7 +106,7 @@ func syncCommand(auth aws.Auth) cli.Command {
 		successFlag     = cli.StringFlag{Name: "success", Usage: "name of the output file where to write the list of keys that succeeded to sync, defaults to /dev/null"}
 		failureFlag     = cli.StringFlag{Name: "failure", Usage: "name of the output file where to write the list of keys that failed to sync, defaults to /dev/null"}
 		srcFlag         = cli.StringFlag{Name: "src", Usage: "source bucket to get the keys from"}
-		dstFlag         = cli.StringFlag{Name: "dst", Usage: "destination bucket to put the keys into"}
+		dstFlag         = cli.StringFlag{Name: "dest", Usage: "destination bucket to put the keys into"}
 		regionFlag      = cli.StringFlag{Name: "aws-region", Value: aws.USEast.Name, Usage: "AWS region where the buckets lives"}
 		concurrencyFlag = cli.IntFlag{Name: "concurrency", Value: 200, Usage: "number of concurrent sync request"}
 	)
@@ -124,12 +124,12 @@ bucket to a destination bucket.`),
 			successFilename := c.String(successFlag.Name)
 			failureFilename := c.String(failureFlag.Name)
 			src := c.String(srcFlag.Name)
-			dst := c.String(dstFlag.Name)
+			dest := c.String(dstFlag.Name)
 			regionName := c.String(regionFlag.Name)
 			conc := c.Int(concurrencyFlag.Name)
 
 			srcU, srcErr := url.Parse(src)
-			dstU, dstErr := url.Parse(dst)
+			dstU, dstErr := url.Parse(dest)
 			region, validRegion := aws.Regions[regionName]
 			hadError := true
 			switch {
@@ -139,10 +139,10 @@ bucket to a destination bucket.`),
 				elog.Printf("need a source bucket to sync from")
 			case srcErr != nil:
 				elog.Printf("%q is not a valid source URL: %v", src, srcErr)
-			case dst == "":
+			case dest == "":
 				elog.Printf("need a destination bucket to sync onto")
 			case dstErr != nil:
-				elog.Printf("%q is not a valid source URL: %v", dst, dstErr)
+				elog.Printf("%q is not a valid source URL: %v", dest, dstErr)
 			case inputFilename == "":
 				elog.Printf("need an input file to read keys from")
 			default:
@@ -298,7 +298,7 @@ func diffCommand() cli.Command {
 	var (
 		oldfileFlag = cli.StringFlag{Name: "old", Usage: "old file from which to read s3 keys"}
 		newfileFlag = cli.StringFlag{Name: "new", Usage: "new file from which to read s3 keys"}
-		dstfileFlag = cli.StringFlag{Name: "dst", Usage: "destination file where to write the keys that have changed"}
+		dstfileFlag = cli.StringFlag{Name: "dest", Usage: "destination file where to write the keys that have changed"}
 	)
 
 	return cli.Command{
@@ -321,7 +321,7 @@ in the new listing and generates a new files containing only those keys.`),
 			case newfile == "":
 				elog.Print("need a filename for new key listing")
 			case dstfile == "":
-				elog.Print("need a filename for dst key listing")
+				elog.Print("need a filename for dest key listing")
 			default:
 				hadError = false
 			}
