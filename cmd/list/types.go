@@ -1,15 +1,8 @@
 package list
 
 import (
-	"bytes"
-	"fmt"
 	"github.com/aybabtme/goamz/s3"
-	"github.com/bmizerany/perks/quantile"
-	"github.com/dustin/go-humanize"
-	"log"
 	"path"
-	"runtime"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -63,68 +56,4 @@ func newJob(rel string) *Job {
 		path:      relpath,
 		// other fields nil-value is correct
 	}
-}
-
-// stats to print the progress of a bucket walk
-type walkStats struct {
-	sync.Mutex
-
-	workToDo  int64
-	followers int64
-
-	newKeys    int64
-	newLeads   int64
-	totalKeys  int64
-	jobsPerSec int64
-	totalSize  uint64
-	mem        runtime.MemStats
-	qtStream   *quantile.Stream
-
-	tick *time.Ticker
-}
-
-func newWalkStats() *walkStats {
-	stats := &walkStats{
-		qtStream: quantile.NewTargeted(0.50, 0.95),
-		tick:     time.NewTicker(time.Second),
-	}
-
-	go func() {
-		for _ = range stats.tick.C {
-			stats.Lock()
-			stats.printProgress()
-			stats.Unlock()
-		}
-	}()
-
-	return stats
-}
-
-func (w *walkStats) Stop() { w.tick.Stop() }
-
-func (w *walkStats) printProgress() {
-	curInflight := atomic.LoadInt64(&inflight)
-
-	runtime.ReadMemStats(&w.mem)
-	p50 := time.Duration(int64(w.qtStream.Query(0.50)))
-	p95 := time.Duration(int64(w.qtStream.Query(0.95)))
-
-	buf := bytes.NewBuffer(nil)
-	_, _ = fmt.Fprintf(buf, "mem=%s\t", humanize.Bytes(w.mem.Sys-w.mem.HeapReleased))
-	_, _ = fmt.Fprintf(buf, "jobs/s=%s\t", humanize.Comma(w.jobsPerSec))
-	_, _ = fmt.Fprintf(buf, "work=%s\t", humanize.Comma(w.workToDo))
-	_, _ = fmt.Fprintf(buf, "follow=%s\t", humanize.Comma(w.followers))
-	_, _ = fmt.Fprintf(buf, "inflight=%s\t", humanize.Comma(curInflight))
-	_, _ = fmt.Fprintf(buf, "keys=%s\t", humanize.Comma(w.totalKeys))
-	_, _ = fmt.Fprintf(buf, "bktsize=%s\t", humanize.Bytes(w.totalSize))
-	_, _ = fmt.Fprintf(buf, "new=%s\t", humanize.Comma(w.newKeys))
-	_, _ = fmt.Fprintf(buf, "leads=%s\t", humanize.Comma(w.newLeads))
-	_, _ = fmt.Fprintf(buf, "p50=%v\t", p50)
-	_, _ = fmt.Fprintf(buf, "p95=%v\t", p95)
-	log.Println(buf.String())
-
-	w.newKeys = 0
-	w.newLeads = 0
-	w.jobsPerSec = 0
-	w.qtStream.Reset()
 }
