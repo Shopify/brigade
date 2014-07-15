@@ -12,6 +12,7 @@ import (
 	"github.com/cheggaaa/pb"
 	"github.com/codegangsta/cli"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -126,6 +127,9 @@ func listCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 		defer func() { lognotnil(file.Close()) }()
 		gw := gzip.NewWriter(file)
 		defer func() { lognotnil(gw.Close()) }()
+
+		log.Printf("starting command %q", c.Command.Name)
+		log.Printf("args=%v", os.Args)
 
 		err := list.List(elog, s3.New(auth, region), bkt, gw, dedup)
 		if err != nil {
@@ -257,6 +261,9 @@ func syncCommand(auth aws.Auth) ([]cli.Flag, func(*cli.Context)) {
 		srcBkt := sss.Bucket(srcU.Host)
 		dstBkt := sss.Bucket(dstU.Host)
 
+		log.Printf("starting command %q", c.Command.Name)
+		log.Printf("args=%v", os.Args)
+
 		syncTask, err := sync.NewSyncTask(elog, srcBkt, dstBkt)
 		if err != nil {
 			elog.Printf("failed to prepare sync task, %v", err)
@@ -298,6 +305,9 @@ func sliceCommand() ([]cli.Flag, func(*cli.Context)) {
 			cli.ShowCommandHelp(c, c.Command.Name)
 			return
 		}
+
+		log.Printf("starting command %q", c.Command.Name)
+		log.Printf("args=%v", os.Args)
 
 		_, err := slice.Slice(elog, filename, n)
 		if err != nil {
@@ -371,6 +381,9 @@ func diffCommand() ([]cli.Flag, func(*cli.Context)) {
 		oldgz := gzread(oldf)
 		dstgz := gzip.NewWriter(dstf)
 		defer func() { lognotnil(dstgz.Close()) }()
+
+		log.Printf("starting command %q", c.Command.Name)
+		log.Printf("args=%v", os.Args)
 
 		if err := diff.Diff(elog, oldgz, newgz, dstgz); err != nil {
 			elog.Printf("failed to diff: %v", err)
