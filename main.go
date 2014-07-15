@@ -19,18 +19,22 @@ var (
 
 	CatchSignals  = []os.Signal{os.Interrupt, os.Kill}
 	SignalTimeout = time.Second * 5
+	ListenAddr    = "127.0.0.1:6060" // loopback to avoid exposing it
 )
 
 func main() {
 
 	// use all cores
-	runtime.GOMAXPROCS(runtime.NumCPU())
+	numCPU := runtime.NumCPU()
+	runtime.GOMAXPROCS(numCPU)
 
 	// pretty print stdout
 	w := tabwriter.NewWriter(os.Stdout, 16, 2, 2, ' ', 0)
 	log.SetOutput(&lineTabWriter{w})
 	log.SetFlags(log.Ltime)
 	log.SetPrefix(brush.Blue("[info] ").String())
+
+	log.Printf("starting with runtime.GOMAXPROCS=%d", numCPU)
 
 	e, closer, err := errorLog(os.Args[0] + ".elog")
 	if err != nil {
@@ -52,6 +56,7 @@ func main() {
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, CatchSignals...)
+		log.Printf("Listening for signals: will shutdown if 2 signals received within %v.", SignalTimeout)
 		for {
 			elog.Printf("received signal %v: send another signal within %v to terminate", <-c, SignalTimeout)
 			select {
@@ -63,9 +68,9 @@ func main() {
 		}
 	}()
 
-	// open a pprof http handler
 	go func() {
-		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
+		log.Printf("Starting HTTP handler on %q, metrics and performance data available", ListenAddr)
+		log.Printf("http handler failed: %v", http.ListenAndServe(ListenAddr, nil))
 	}()
 
 	if err := newApp(auth).Run(os.Args); err != nil {
