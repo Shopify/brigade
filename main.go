@@ -17,8 +17,8 @@ import (
 var (
 	elog *log.Logger
 
-	CatchSignals  = []os.Signal{os.Interrupt, os.Kill}
-	SignalTimeout = time.Second * 5
+	catchSignals  = []os.Signal{os.Interrupt, os.Kill}
+	signalTimeout = time.Second * 5
 )
 
 func main() {
@@ -51,11 +51,11 @@ func main() {
 	// long running jobs are painful to kill by mistake
 	go func() {
 		c := make(chan os.Signal, 1)
-		signal.Notify(c, CatchSignals...)
+		signal.Notify(c, catchSignals...)
 		for {
-			elog.Printf("received signal %v: send another signal within %v to terminate", <-c, SignalTimeout)
+			elog.Printf("received signal %v: send another signal within %v to terminate", <-c, signalTimeout)
 			select {
-			case <-time.After(SignalTimeout):
+			case <-time.After(signalTimeout):
 				elog.Printf("no signal received: continuing")
 			case s := <-c:
 				elog.Fatalf("received signal %v: terminating", s)
