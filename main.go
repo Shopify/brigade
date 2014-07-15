@@ -84,7 +84,7 @@ func errorLog(filename string) (*log.Logger, io.Closer, error) {
 	return log.New(out, prfx, log.Ltime|log.Lshortfile), efile, nil
 }
 
-func lognotnil(err error) {
+func logIfErr(err error) {
 	if err != nil {
 		elog.Print(err)
 	}
