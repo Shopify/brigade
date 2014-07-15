@@ -199,11 +199,6 @@ bucket to a destination bucket.`),
 			}
 			defer func() { logIfErr(failCloser()) }()
 
-			successGzWr := gzip.NewWriter(successFile)
-			defer func() { logIfErr(successGzWr.Close()) }()
-			failureGzWr := gzip.NewWriter(failureFile)
-			defer func() { logIfErr(failureGzWr.Close()) }()
-
 			// tracking the progress in reading the file helps tracking
 			// how far in the sync process we are.
 			bar := pb.New64(fi.Size())
@@ -235,7 +230,7 @@ bucket to a destination bucket.`),
 				return
 			}
 			syncTask.SyncPara = conc
-			err = syncTask.Start(inputGzRd, successGzWr, failureGzWr)
+			err = syncTask.Start(inputGzRd, successFile, failureFile)
 			if err != nil {
 				elog.Printf("failed to sync: %v", err)
 			}
