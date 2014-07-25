@@ -7,12 +7,11 @@ import (
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/cmd/slice"
 	"github.com/Shopify/brigade/cmd/sync"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/aws"
 	"github.com/aybabtme/goamz/s3"
-	"github.com/cheggaaa/pb"
 	"github.com/codegangsta/cli"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -73,11 +72,14 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 
 			switch {
 			case bucket == "":
-				elog.Printf("invalid bucket name: %q", bucket)
+				logrus.WithField("name", bucket).Error("invalid bucket name")
 			case !validRegion:
-				elog.Printf("invalid aws-region: %q", regionName)
+				logrus.WithField("region", regionName).Error("invalid aws-region")
 			case dsterr != nil:
-				elog.Printf("couldn't create %q: %v", dest, dsterr)
+				logrus.WithFields(logrus.Fields{
+					"error":    dsterr,
+					"filename": dest,
+				}).Error("couldn't create destination file")
 			default:
 				hadError = false
 			}
@@ -89,12 +91,11 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 			gw := gzip.NewWriter(file)
 			defer func() { logIfErr(gw.Close()) }()
 
-			log.Printf("starting command %q", c.Command.Name)
-			log.Printf("args=%v", os.Args)
+			logrus.Info("starting command", c.Command.Name)
 
-			err := list.List(elog, s3.New(auth, region), bucket, gw, dedup)
+			err := list.List(s3.New(auth, region), bucket, gw, dedup)
 			if err != nil {
-				elog.Printf("failed to list bucket: %v", err)
+				logrus.WithField("error", err).Error("failed to list bucket")
 			}
 		},
 	}
@@ -134,17 +135,23 @@ bucket to a destination bucket.`),
 			hadError := true
 			switch {
 			case !validRegion:
-				elog.Printf("%q is not a valid region name", regionName)
+				logrus.WithField("region", regionName).Error("invalid aws-region")
 			case src == "":
-				elog.Printf("need a source bucket to sync from")
+				logrus.Error("need a source bucket to sync from")
 			case srcErr != nil:
-				elog.Printf("%q is not a valid source URL: %v", src, srcErr)
+				logrus.WithFields(logrus.Fields{
+					"error":  srcErr,
+					"source": src,
+				}).Error("not a valid source URL")
 			case dest == "":
-				elog.Printf("need a destination bucket to sync onto")
+				logrus.Error("need a destination bucket to sync onto")
 			case dstErr != nil:
-				elog.Printf("%q is not a valid source URL: %v", dest, dstErr)
+				logrus.WithFields(logrus.Fields{
+					"error":       srcErr,
+					"destination": dest,
+				}).Error("not a valid destination URL")
 			case inputFilename == "":
-				elog.Printf("need an input file to read keys from")
+				logrus.Error("need an input file to read keys from")
 			default:
 				hadError = false
 			}
@@ -155,16 +162,14 @@ bucket to a destination bucket.`),
 
 			listfile, err := os.Open(inputFilename)
 			if err != nil {
-				elog.Printf("couldn't open listing file: %v", err)
+				logrus.WithFields(logrus.Fields{
+					"error":    err,
+					"filename": inputFilename,
+				}).Error("couldn't open listing file")
 				cli.ShowCommandHelp(c, c.Command.Name)
 				return
 			}
 			defer func() { logIfErr(listfile.Close()) }()
-
-			fi, err := listfile.Stat()
-			if err != nil {
-				elog.Fatalf("couldn't stat listing file: %v", err)
-			}
 
 			createOutput := func(filename string) (io.Writer, func() error, error) {
 				if filename == "" {
@@ -180,7 +185,10 @@ bucket to a destination bucket.`),
 				gzFile := gzip.NewWriter(file)
 				closer := func() error {
 					if err := gzFile.Close(); err != nil {
-						elog.Printf("closing gzip writer to %q: %v", filename, err)
+						logrus.WithFields(logrus.Fields{
+							"error":    err,
+							"filename": filename,
+						}).Error("closing gzip writer")
 					}
 					return file.Close()
 				}
@@ -189,50 +197,39 @@ bucket to a destination bucket.`),
 
 			successFile, sucCloser, err := createOutput(successFilename)
 			if err != nil {
-				elog.Fatalf("couldn't create success key file: %v", err)
+				logrus.WithField("error", err).Error("couldn't create success key file")
 			}
 			defer func() { logIfErr(sucCloser()) }()
 
 			failureFile, failCloser, err := createOutput(failureFilename)
 			if err != nil {
-				elog.Fatalf("couldn't create failure key file: %v", err)
+				logrus.WithField("error", err).Error("couldn't create failure key file")
 			}
 			defer func() { logIfErr(failCloser()) }()
 
-			// tracking the progress in reading the file helps tracking
-			// how far in the sync process we are.
-			bar := pb.New64(fi.Size())
-			bar.ShowSpeed = true
-			bar.SetUnits(pb.U_BYTES)
-			barr := bar.NewProxyReader(listfile)
-
-			inputGzRd, err := gzip.NewReader(barr)
+			inputGzRd, err := gzip.NewReader(listfile)
 			if err != nil {
-				elog.Printf("listing file is not a gzip file: %v", err)
+				logrus.WithField("error", err).Error("listing file is not a gzip file")
 				cli.ShowCommandHelp(c, c.Command.Name)
 				return
 			}
 			defer func() { logIfErr(inputGzRd.Close()) }()
 
-			bar.Start()
-			defer bar.Finish()
-
 			sss := s3.New(auth, region)
 			srcBkt := sss.Bucket(srcU.Host)
 			dstBkt := sss.Bucket(dstU.Host)
 
-			log.Printf("starting command %q", c.Command.Name)
-			log.Printf("args=%v", os.Args)
+			logrus.Info("starting command", c.Command.Name)
 
-			syncTask, err := sync.NewSyncTask(elog, srcBkt, dstBkt)
+			syncTask, err := sync.NewSyncTask(srcBkt, dstBkt)
 			if err != nil {
-				elog.Printf("failed to prepare sync task, %v", err)
+				logrus.WithField("error", err).Error("failed to prepare sync task")
 				return
 			}
 			syncTask.SyncPara = conc
 			err = syncTask.Start(inputGzRd, successFile, failureFile)
 			if err != nil {
-				elog.Printf("failed to sync: %v", err)
+				logrus.WithField("error", err).Error("failed to sync")
 			}
 		},
 	}
@@ -266,9 +263,9 @@ Will produce the files:
 			hadError := true
 			switch {
 			case filename == "":
-				elog.Printf("need a file to slice")
+				logrus.Error("need a file to slice")
 			case n <= 1:
-				elog.Printf("need to slice in at least 2 parts")
+				logrus.Error("need to slice in at least 2 parts")
 			default:
 				hadError = false
 			}
@@ -277,12 +274,11 @@ Will produce the files:
 				return
 			}
 
-			log.Printf("starting command %q", c.Command.Name)
-			log.Printf("args=%v", os.Args)
+			logrus.Info("starting command", c.Command.Name)
 
-			_, err := slice.Slice(elog, filename, n)
+			_, err := slice.Slice(filename, n)
 			if err != nil {
-				elog.Printf("failed to slice: %v", err)
+				logrus.WithField("error", err).Error("failed to slice")
 			}
 
 		},
@@ -312,11 +308,11 @@ in the new listing and generates a new files containing only those keys.`),
 			hadError := true
 			switch {
 			case oldfile == "":
-				elog.Print("need a filename for old key listing")
+				logrus.Error("need a filename for old key listing")
 			case newfile == "":
-				elog.Print("need a filename for new key listing")
+				logrus.Error("need a filename for new key listing")
 			case dstfile == "":
-				elog.Print("need a filename for dest key listing")
+				logrus.Error("need a filename for dest key listing")
 			default:
 				hadError = false
 			}
@@ -328,7 +324,10 @@ in the new listing and generates a new files containing only those keys.`),
 			open := func(filename string) *os.File {
 				f, err := os.Open(filename)
 				if err != nil {
-					elog.Fatalf("couldn't open file %q: %v", filename, err)
+					logrus.WithFields(logrus.Fields{
+						"error":    err,
+						"filename": filename,
+					}).Fatal("couldn't open file")
 				}
 				return f
 			}
@@ -340,14 +339,20 @@ in the new listing and generates a new files containing only those keys.`),
 
 			dstf, err := os.Create(dstfile)
 			if err != nil {
-				elog.Fatalf("couldn't create destination file %q: %v", dstfile, err)
+				logrus.WithFields(logrus.Fields{
+					"error":    err,
+					"filename": dstfile,
+				}).Fatal("couldn't create destination file")
 			}
 			defer func() { logIfErr(dstf.Close()) }()
 
 			gzread := func(f *os.File) *gzip.Reader {
 				gzr, err := gzip.NewReader(f)
 				if err != nil {
-					elog.Fatalf("couldn't read gzip from %q: %v", f.Name(), err)
+					logrus.WithFields(logrus.Fields{
+						"error":    err,
+						"filename": f.Name(),
+					}).Fatal("couldn't read gzip")
 				}
 				return gzr
 			}
@@ -357,11 +362,10 @@ in the new listing and generates a new files containing only those keys.`),
 			dstgz := gzip.NewWriter(dstf)
 			defer func() { logIfErr(dstgz.Close()) }()
 
-			log.Printf("starting command %q", c.Command.Name)
-			log.Printf("args=%v", os.Args)
+			logrus.Info("starting command", c.Command.Name)
 
-			if err := diff.Diff(elog, oldgz, newgz, dstgz); err != nil {
-				elog.Printf("failed to diff: %v", err)
+			if err := diff.Diff(oldgz, newgz, dstgz); err != nil {
+				logrus.WithField("error", err).Error("failed to diff")
 			}
 		},
 	}

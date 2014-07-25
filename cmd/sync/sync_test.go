@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/sync"
 	"github.com/Shopify/brigade/s3mock"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
 	"github.com/kr/pretty"
 	"io"
-	"log"
 	"math/rand"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -18,7 +17,6 @@ import (
 
 func TestCanSync(t *testing.T) {
 	time.AfterFunc(time.Second*10, func() { panic("infinite loop?") })
-	log.SetOutput(testwriter(t))
 
 	mockbkt := s3mock.NewPerfBucket(t)
 	mocks3 := s3mock.NewMock(t).Seed(mockbkt)
@@ -33,7 +31,7 @@ func TestCanSync(t *testing.T) {
 	var synced bytes.Buffer
 	var failed bytes.Buffer
 
-	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	syncTask, err := sync.NewSyncTask(src, dst)
 	if err != nil {
 		t.Fatalf("can't create sync task: %v", err)
 	}
@@ -88,7 +86,6 @@ func TestCanSync(t *testing.T) {
 
 func TestSyncRecordsError(t *testing.T) {
 	time.AfterFunc(time.Second*10, func() { panic("infinite loop?") })
-	log.SetOutput(testwriter(t))
 
 	mockbkt := s3mock.NewPerfBucket(t)
 	mocks3 := s3mock.NewMock(t).Seed(mockbkt)
@@ -112,7 +109,7 @@ func TestSyncRecordsError(t *testing.T) {
 			{Message: s3.ErrServiceUnavailable},
 		})
 
-	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	syncTask, err := sync.NewSyncTask(src, dst)
 	if err != nil {
 		t.Fatalf("can't create sync task: %v", err)
 	}
@@ -167,7 +164,6 @@ func TestSyncRecordsError(t *testing.T) {
 
 func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 	time.AfterFunc(time.Second*10, func() { panic("infinite loop?") })
-	log.SetOutput(testwriter(t))
 
 	rand.Seed(42)
 
@@ -193,7 +189,7 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 			{Message: s3.ErrServiceUnavailable},
 		})
 
-	syncTask, err := sync.NewSyncTask(testlogger(t), src, dst)
+	syncTask, err := sync.NewSyncTask(src, dst)
 	if err != nil {
 		t.Fatalf("can't create sync task: %v", err)
 	}
@@ -254,26 +250,6 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 	}
 }
 
-// helpers
-
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
-	})
-}
-
-// magic, a testing.T logger!
-func testlogger(t *testing.T) *log.Logger {
-	return log.New(io.MultiWriter(os.Stderr, testwriter(t)), "[test] ", 0)
-}
-
 // encode s3 keys from a json writer, fatals on error
 func encodeKeys(keys []s3.Key) *bytes.Buffer {
 	out := bytes.NewBuffer(nil)
@@ -281,7 +257,7 @@ func encodeKeys(keys []s3.Key) *bytes.Buffer {
 	for _, key := range keys {
 		err := enc.Encode(&key)
 		if err != nil {
-			log.Fatalf("encoding buf, %v", err)
+			logrus.WithField("error", err).Error("encoding buffer")
 		}
 	}
 	return out
@@ -297,7 +273,7 @@ func decodeKeys(in *bytes.Buffer) []s3.Key {
 		if err == io.EOF {
 			return keys
 		} else if err != nil {
-			log.Fatalf("encoding buf, %v", err)
+			logrus.WithField("error", err).Error("decoding buffer")
 		}
 		keys = append(keys, key)
 	}

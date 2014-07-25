@@ -3,13 +3,11 @@ package diff
 import (
 	"bufio"
 	"encoding/json"
+	"expvar"
 	"fmt"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
-	"github.com/aybabtme/uniplot/spark"
-	"github.com/bradfitz/iter"
-	"github.com/dustin/go-humanize"
 	"io"
-	"log"
 	"runtime"
 	"sync"
 	"time"
@@ -19,30 +17,43 @@ var (
 	bufferFactor = 10
 )
 
-type diffTask struct {
-	elog *log.Logger
+type diffTask struct{}
+
+var metrics = struct {
+	oldKeys     *expvar.Int
+	diffKeys    *expvar.Int
+	newKeys     *expvar.Int
+	encodedKeys *expvar.Int
+}{
+	oldKeys:     expvar.NewInt("brigade.diff.oldKeys"),
+	diffKeys:    expvar.NewInt("brigade.diff.diffKeys"),
+	newKeys:     expvar.NewInt("brigade.diff.newKeys"),
+	encodedKeys: expvar.NewInt("brigade.diff.encodedKeys"),
 }
 
 // Diff reads s3 keys in JSON form from old and new list, compute which
 // keys have changed from the old to the new one, writing those keys
 // to the output writer (in JSON as well).
-func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
+func Diff(oldList, newList io.Reader, output io.Writer) error {
 
-	differ := diffTask{elog: el}
+	var differ diffTask
 
 	start := time.Now()
 
-	log.Printf("computing difference in keys")
+	logrus.Info("computing difference in keys")
 	diff, differr := differ.computeDifference(oldList, newList)
 	if differr != nil && len(diff) == 0 {
 		return fmt.Errorf("computing source difference, produced no diff, %v", differr)
 	}
 
-	log.Printf("done computing difference in %v: %s keys differ", time.Since(start), humanize.Comma(int64(len(diff))))
+	logrus.WithFields(logrus.Fields{
+		"duration":       time.Since(start),
+		"key_difference": len(diff),
+	}).Info("done computing difference in keys")
 
 	writeerr := differ.writeDiff(output, diff)
 
-	log.Printf("done writing difference in %v", time.Since(start))
+	logrus.WithField("duration", time.Since(start)).Info("done writing difference to file")
 
 	switch {
 	case differr != nil && writeerr != nil:
@@ -58,11 +69,11 @@ func Diff(el *log.Logger, oldList, newList io.Reader, output io.Writer) error {
 
 func (dt *diffTask) computeDifference(oldList, newList io.Reader) ([]s3.Key, error) {
 
-	log.Printf("reading old key list...")
+	logrus.Info("reading old key list...")
 	knownKeys, olderr := dt.readOldList(oldList)
 	switch olderr {
 	case io.ErrUnexpectedEOF:
-		dt.elog.Printf("reading old source: %v", olderr)
+		logrus.WithField("error", olderr).Error("reading old source")
 		// carry on
 	case nil:
 		// carry on
@@ -71,13 +82,13 @@ func (dt *diffTask) computeDifference(oldList, newList io.Reader) ([]s3.Key, err
 		return nil, fmt.Errorf("reading old source, %v", olderr)
 	}
 
-	log.Printf("old list contains %s keys", humanize.Comma(int64(knownKeys.Len())))
+	logrus.WithField("key_count", knownKeys.Len()).Info("done reading keys from old source")
 
-	log.Printf("reading new key list...")
+	logrus.Info("reading new key list...")
 	diff, listlen, newerr := dt.filterNewKeys(newList, knownKeys)
 	switch newerr {
 	case io.ErrUnexpectedEOF:
-		dt.elog.Printf("reading new source: %v", newerr)
+		logrus.WithField("error", newerr).Error("reading new source")
 		// carry on
 	case nil:
 		// carry on
@@ -86,7 +97,7 @@ func (dt *diffTask) computeDifference(oldList, newList io.Reader) ([]s3.Key, err
 		return nil, fmt.Errorf("reading first source, %v", newerr)
 	}
 
-	log.Printf("new list contains %s keys", humanize.Comma(int64(listlen)))
+	logrus.WithField("key_count", listlen).Info("done reading keys from new source")
 
 	switch {
 	case olderr != nil && newerr != nil:
@@ -107,20 +118,16 @@ func (dt *diffTask) readOldList(src io.Reader) (keySet, error) {
 
 	doneSrcA := make(chan struct{})
 	go func() {
-		sprk := spark.Spark(time.Millisecond * 60)
 		defer close(doneSrcA)
-		sprk.Start()
-		sprk.Units = "keys"
 		for key := range keys {
+			metrics.oldKeys.Add(1)
 			// stores the etag, which will differ if files have changed
 			keyset.Add(key.ETag)
-			sprk.Add(1.0)
 		}
-		sprk.Stop()
 	}()
 
 	wg := sync.WaitGroup{}
-	for _ = range iter.N(runtime.NumCPU()) {
+	for i := 0; i < runtime.NumCPU(); i++ {
 		wg.Add(1)
 		go dt.decode(&wg, decoders, keys)
 	}
@@ -148,23 +155,20 @@ func (dt *diffTask) filterNewKeys(src io.Reader, keyset keySet) ([]s3.Key, int, 
 
 	doneDiffing := make(chan struct{})
 	go func() {
-		sprk := spark.Spark(time.Millisecond * 60)
 		defer close(doneDiffing)
-		sprk.Start()
-		sprk.Units = "keys"
 		for key := range keys {
+			metrics.newKeys.Add(1)
 			newKeys++
-			sprk.Add(1.0)
 			// only add ETags that aren't known from the old list
 			if !keyset.Contains(key.ETag) {
+				metrics.diffKeys.Add(1)
 				diffKeys = append(diffKeys, key)
 			}
 		}
-		sprk.Stop()
 	}()
 
 	wg := sync.WaitGroup{}
-	for _ = range iter.N(runtime.NumCPU()) {
+	for i := 0; i < runtime.NumCPU(); i++ {
 		wg.Add(1)
 		go dt.decode(&wg, decoders, keys)
 	}
@@ -190,6 +194,7 @@ func (dt *diffTask) writeDiff(w io.Writer, keys []s3.Key) error {
 		if err != nil {
 			return fmt.Errorf("failed to encode key %d/%d, %v", i+1, len(keys), err)
 		}
+		metrics.encodedKeys.Add(1)
 	}
 	return nil
 }
@@ -218,7 +223,7 @@ func (dt *diffTask) decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- 
 	for line := range lines {
 		err := json.Unmarshal(line, &key)
 		if err != nil {
-			dt.elog.Printf("unmarshaling line: %v", err)
+			logrus.WithField("error", err).Error("failed to unmarshal s3.Key from line")
 		} else {
 			keys <- key
 		}

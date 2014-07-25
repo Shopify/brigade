@@ -38,15 +38,14 @@ package list
 
 import (
 	"encoding/json"
+	"expvar"
 	"fmt"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
-	"github.com/dustin/go-humanize"
 	"io"
-	"log"
 	"math"
 	"net/url"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -69,19 +68,49 @@ var (
 	root = func(path string) *url.URL {
 		u, err := url.Parse(path)
 		if err != nil {
-			log.Panicf("%q must be a valid URL: %v", path, err)
+			logrus.WithFields(logrus.Fields{
+				"path":  path,
+				"error": err,
+			}).Panic("invalid URL")
+
 		}
 		return u
 	}("/")
 )
 
-type listTask struct {
-	elog *log.Logger
+type listTask struct{}
+
+var metrics = struct {
+	workToDo        *expvar.Int
+	followers       *expvar.Int
+	totalKeys       *expvar.Int
+	totalBucketSize *expvar.Int
+
+	inflight         *expvar.Int
+	secondsWaitingS3 *expvar.Float
+
+	jobsAttempted *expvar.Int
+	jobsOk        *expvar.Int
+	jobsRescued   *expvar.Int
+	jobsAbandoned *expvar.Int
+}{
+	workToDo:        expvar.NewInt("brigade.list.workToDo"),
+	followers:       expvar.NewInt("brigade.list.followers"),
+	totalKeys:       expvar.NewInt("brigade.list.totalKeys"),
+	totalBucketSize: expvar.NewInt("brigade.list.totalBucketSize"),
+
+	inflight:         expvar.NewInt("brigade.list.inflight"),
+	secondsWaitingS3: expvar.NewFloat("brigade.list.secondsWaitingS3"),
+
+	jobsAttempted: expvar.NewInt("brigade.list.jobsAttempted"),
+	jobsOk:        expvar.NewInt("brigade.list.jobsOk"),
+	jobsRescued:   expvar.NewInt("brigade.list.jobsRescued"),
+	jobsAbandoned: expvar.NewInt("brigade.list.jobsAbandoned"),
 }
 
 // List an s3 bucket and write the keys in JSON form to dst. If dedup, will
 // deduplicate all keys using a set (consumes more memory).
-func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) error {
+func List(sss *s3.S3, src string, dst io.Writer, dedup bool) error {
 
 	srcU, srcErr := url.Parse(src)
 	if srcErr != nil {
@@ -93,20 +122,29 @@ func List(el *log.Logger, sss *s3.S3, src string, dst io.Writer, dedup bool) err
 	// Start a key encoder, which writes to the file concurrently
 	encDone := make(chan struct{})
 	go func(w io.Writer) {
+		logrus.Info("start encoding keys to destination writer")
 		defer close(encDone)
 		enc := json.NewEncoder(w)
 		for k := range keys {
 			if err := enc.Encode(k); err != nil {
-				el.Fatalf("Couldn't encode key %q: %v", k.Key, err)
+				logrus.WithFields(logrus.Fields{
+					"key":   k,
+					"error": err,
+				}).Fatal("couldn't encode key to destination")
+				return
 			}
 		}
+		logrus.Info("done encoding keys to dst file")
 	}(dst)
 
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
-	lister := listTask{elog: el}
+
+	logrus.WithField("bucket_source", srcU).Info("starting the listing of all keys in bucket")
+	lister := listTask{}
 	err := lister.listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
+	logrus.Info("done listing, waiting for key encoder to finish")
 	close(keys)
 	<-encDone
 	if err != nil {
@@ -128,7 +166,13 @@ func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key 
 		f(key)
 	})
 
-	log.Printf("visited %d objects in %v, totalling %s", count, time.Since(start), humanize.Bytes(size))
+	logrus.WithFields(logrus.Fields{
+		"bucket_source":       src,
+		"bucket_object_count": count,
+		"duration":            time.Since(start),
+		"bucket_total_size":   size,
+	}).Info("done visiting bucket")
+
 	return err
 }
 
@@ -138,18 +182,14 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 	fringe := make(chan *Job, Concurrency)
 	result := make(chan *Job, Concurrency)
 
-	followers := &lifoJobs{}
+	followers := newLifoJob(metrics.followers)
 	visited := make(map[string]struct{})
-	workSet := make(jobSet)
+	workSet := newSet(metrics.workToDo)
 
 	firstJob := newJob(root)
 
 	workSet.Add(firstJob)
 	fringe <- firstJob
-
-	// Stats to track progress
-	stats := newWalkStats()
-	defer stats.Stop()
 
 	// Start the workers, which expands the edges of the fringe
 	wg := sync.WaitGroup{}
@@ -180,72 +220,84 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 		workSet.Delete(doneJob)
 
 		// track some metrics
-		stats.Lock()
-		stats.workToDo = int64(len(workSet))
-		stats.followers = int64(followers.Len())
-		stats.jobsPerSec++
-		stats.qtStream.Insert(float64(doneJob.duration.Nanoseconds()))
-		stats.Unlock()
+
+		metrics.jobsAttempted.Add(1)
+		metrics.secondsWaitingS3.Add(doneJob.duration.Seconds())
 
 		// if the job was in error, maybe try to reenqueue it
 		if doneJob.err != nil {
 			if doneJob.retryLeft > 0 {
 				doneJob.retryLeft--
-				l.elog.Printf("job=%d\tretrying\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
+
+				logrus.WithFields(logrus.Fields{
+					"error":   doneJob.err,
+					"retries": doneJob.retryLeft,
+					"job_id":  doneJob.id,
+				}).Warn("retrying failed job")
+
 				doneJob.err = nil
 				followers.Add(doneJob)
 				workSet.Add(doneJob)
 			} else {
-				l.elog.Printf("job=%d\tabandon\tretries=%d\terr=%v", doneJob.id, doneJob.retryLeft, doneJob.err)
+				metrics.jobsAbandoned.Add(1)
+
+				logrus.WithFields(logrus.Fields{
+					"key":     doneJob.path,
+					"error":   doneJob.err,
+					"retries": doneJob.retryLeft,
+					"job_id":  doneJob.id,
+				}).Error("abandoning failed job after too many retries")
+
 			}
 			continue
 		} else if doneJob.retryLeft != MaxRetry {
-			log.Printf("job=%d\trescued\tretries=%d", doneJob.id, doneJob.retryLeft)
+			metrics.jobsRescued.Add(1)
+			logrus.WithFields(logrus.Fields{
+				"job":     doneJob.id,
+				"retries": doneJob.retryLeft,
+			}).Info("job rescued from error")
+		} else {
+			metrics.jobsOk.Add(1)
 		}
 
-		l.visitKeys(doneJob.keys, keyVisitor, dedup, visited, stats)
+		l.visitKeys(doneJob.keys, keyVisitor, dedup, visited)
 
 		for _, job := range l.jobsFromFollowers(doneJob.followers, workSet, dedup, visited) {
 			followers.Add(job)
 		}
-
-		stats.Lock()
-		stats.newKeys += int64(len(doneJob.keys))
-		stats.newLeads += int64(len(doneJob.followers))
-		stats.Unlock()
 	}
 
-	log.Printf("no more jobs, closing")
+	logrus.Info("no more jobs, closing")
 	// invariant: no jobs are on the fringe, no results in the workset,
 	// it is thus safe to tell the workers to stop waiting.
 	close(fringe)
 	// it's safe to close the results since no jobs are in, waiting for
 	// results
 	close(result)
-	log.Printf("waiting for workers")
+	logrus.Info("waiting for workers")
 	wg.Wait()
-	log.Printf("workers stopped")
+	logrus.Info("workers stopped")
 
 	return nil
 }
 
-func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}, stats *walkStats) {
+func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}) {
 	for _, key := range keys {
 		if dedup {
 			if _, ok := visited[key.Key]; ok {
-				l.elog.Printf("deduplicate-key=%q", key.Key)
+				logrus.WithField("key", key).Printf("deduplicate key")
 				continue
 			}
 			visited[key.Key] = struct{}{}
 		}
+		metrics.totalKeys.Add(1)
+		metrics.totalBucketSize.Add(int64(key.Size))
 
-		stats.totalKeys++
-		stats.totalSize += uint64(key.Size)
 		visitor(key)
 	}
 }
 
-func (l *listTask) jobsFromFollowers(newFollowers []string, workset jobSet, dedup bool, visited map[string]struct{}) []*Job {
+func (l *listTask) jobsFromFollowers(newFollowers []string, workset *jobSet, dedup bool, visited map[string]struct{}) []*Job {
 	var newJobs []*Job
 	for _, follow := range newFollowers {
 		// prepare a new job, add it to the worker set and
@@ -254,7 +306,7 @@ func (l *listTask) jobsFromFollowers(newFollowers []string, workset jobSet, dedu
 
 		if dedup {
 			if _, ok := visited[newjob.path]; ok {
-				l.elog.Printf("deduplicate-job=%q", newjob.path)
+				logrus.WithField("path", newjob.path).Warn("duplicate job path")
 				continue
 			}
 		}
@@ -273,22 +325,18 @@ func (l *listTask) jobsFromFollowers(newFollowers []string, workset jobSet, dedu
 	return newJobs
 }
 
-// inflight tracks how many requests to S3 are currently inflight. Use atomic calls
-// to access this value.
-var inflight int64
-
 // list workers receives jobs and LIST the path in those jobs, sleeping between
 // retryable errors before re-enqueing them.
 func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<- *Job) {
 	defer wg.Done()
 	for job := range jobs {
 		// track duration + inflight requests
-		atomic.AddInt64(&inflight, 1)
+		metrics.inflight.Add(1)
 		start := time.Now()
 		// list this path on the bkt
 		res, err := bkt.List(job.path, "/", "", MaxList)
 		job.duration = time.Since(start)
-		atomic.AddInt64(&inflight, -1)
+		metrics.inflight.Add(-1)
 
 		if err != nil {
 			job.err = err
@@ -298,9 +346,10 @@ func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *J
 			attemptsSoFar := float64(MaxRetry - job.retryLeft + 1)
 			backoff := math.Pow(2.0, attemptsSoFar)
 			sleepFor := time.Duration(backoff) * InitRetry
-			l.elog.Printf("worker-sleep-on-error=%v\tbackoff=%v", sleepFor, backoff)
+
+			logrus.WithField("backoff", backoff).Warn("worker is sleeping on error")
 			time.Sleep(sleepFor)
-			l.elog.Printf("worker-woke-up")
+			logrus.WithField("backoff", backoff).Warn("worker woke up")
 		} else {
 			// if all went well, set the job results
 			job.keys = res.Contents

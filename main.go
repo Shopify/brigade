@@ -1,24 +1,22 @@
 package main
 
 import (
-	"github.com/aybabtme/color/brush"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/aws"
-	"io"
-	"log"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
-	"text/tabwriter"
 	"time"
+
+	// pprof attachment point
+	_ "net/http/pprof"
 )
 
 var (
-	elog *log.Logger
-
 	catchSignals  = []os.Signal{os.Interrupt, os.Kill}
 	signalTimeout = time.Second * 5
+	addr          = "127.0.0.1:6060"
 )
 
 func main() {
@@ -26,26 +24,9 @@ func main() {
 	// use all cores
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	// pretty print stdout
-	w := tabwriter.NewWriter(os.Stdout, 16, 2, 2, ' ', 0)
-	log.SetOutput(&lineTabWriter{w})
-	log.SetFlags(log.Ltime)
-	log.SetPrefix(brush.Blue("[info] ").String())
-
-	e, closer, err := errorLog(os.Args[0] + ".elog")
-	if err != nil {
-		log.Fatal(err)
-	}
-	elog = e
-	defer func() {
-		if err := closer.Close(); err != nil {
-			log.Printf("ERROR: closing error logger file, %v", err)
-		}
-	}()
-
 	auth, err := aws.EnvAuth()
 	if err != nil {
-		elog.Fatalf("need an AWS auth pair in AWS_ACCESS_KEY, AWS_SECRET_KEY: %v", err)
+		logrus.WithField("error", err).Fatal("need an AWS auth pair in AWS_ACCESS_KEY, AWS_SECRET_KEY")
 	}
 
 	// long running jobs are painful to kill by mistake
@@ -53,52 +34,37 @@ func main() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, catchSignals...)
 		for {
-			elog.Printf("received signal %v: send another signal within %v to terminate", <-c, signalTimeout)
+			logrus.WithField("signal", <-c).Warn("received signal")
+			logrus.WithField("timeout", signalTimeout).Warn("send another signal to terminate")
 			select {
 			case <-time.After(signalTimeout):
-				elog.Printf("no signal received: continuing")
+				logrus.Info("no signal received: continuing")
 			case s := <-c:
-				elog.Fatalf("received signal %v: terminating", s)
+				logrus.WithField("signal", s).Fatal("terminating")
 			}
 		}
 	}()
 
 	// open a pprof http handler
+
 	go func() {
-		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
+		// don't monitor short tasks
+		time.Sleep(time.Second * 2)
+		logrus.WithFields(logrus.Fields{
+			"addr":    addr,
+			"metrics": "/debug/vars",
+			"pprof":   "/debug/pprof",
+		}).Info("monitoring handler listening")
+		logrus.Fatal(http.ListenAndServe(addr, nil))
 	}()
 
 	if err := newApp(auth).Run(os.Args); err != nil {
-		elog.Fatal(err)
+		logrus.WithField("error", err).Error("couldn't run app")
 	}
-}
-
-func errorLog(filename string) (*log.Logger, io.Closer, error) {
-	// pretty print stderr + error file
-	efile, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-	if err != nil {
-		return nil, nil, err
-	}
-	out := io.MultiWriter(os.Stderr, efile)
-	prfx := brush.Red("[error] ").String()
-	return log.New(out, prfx, log.Ltime|log.Lshortfile), efile, nil
 }
 
 func logIfErr(err error) {
 	if err != nil {
-		elog.Print(err)
+		logrus.WithField("error", err).Error("unspecified error in defered call")
 	}
-}
-
-// Pretty print, aligned logs.
-type lineTabWriter struct {
-	tab *tabwriter.Writer
-}
-
-func (l *lineTabWriter) Write(p []byte) (int, error) {
-	n, err := l.tab.Write(p)
-	if err != nil {
-		return n, err
-	}
-	return n, l.tab.Flush()
 }
