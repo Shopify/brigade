@@ -103,8 +103,7 @@ var metrics = struct {
 	jobsAbandoned: expvar.NewInt("brigade.list.jobsAbandoned"),
 }
 
-// List an s3 bucket and write the keys in JSON form to dst. If dedup, will
-// deduplicate all keys using a set (consumes more memory).
+// List an s3 bucket and write the keys in JSON form to dst.
 func List(sss *s3.S3, bucket, prefix string, dst io.Writer) error {
 
 	keys := make(chan s3.Key, Concurrency)
@@ -133,7 +132,6 @@ func List(sss *s3.S3, bucket, prefix string, dst io.Writer) error {
 	logrus.WithField("bucket_source", bucket).Info("starting the listing of all keys in bucket")
 	lister := listTask{}
 	err := lister.listAllKeys(sss, bucket, prefix, func(k s3.Key) { keys <- k })
-
 	// wait until the file writer is done
 	logrus.Info("done listing, waiting for key encoder to finish")
 	close(keys)
