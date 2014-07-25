@@ -44,7 +44,6 @@ func listCommand(auth aws.Auth) cli.Command {
 		bucketFlag = cli.StringFlag{Name: "bucket", Value: "", Usage: "path to bucket to list, of the form s3://name/path/"}
 		dstFlag    = cli.StringFlag{Name: "dest", Value: "bucket_list.json.gz", Usage: "filename to which the list of keys is saved"}
 		regionFlag = cli.StringFlag{Name: "aws-region", Value: aws.USEast.Name, Usage: "AWS region where the bucket lives"}
-		dedupFlag  = cli.BoolFlag{Name: "dedup", Usage: "deduplicate jobs and keys, consumes much more memory"}
 	)
 
 	return cli.Command{
@@ -53,13 +52,12 @@ func listCommand(auth aws.Auth) cli.Command {
 		Description: strings.TrimSpace(`
 Do a traversal of the S3 bucket using many concurrent workers. The result of
 traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
-		Flags: []cli.Flag{bucketFlag, dstFlag, regionFlag, dedupFlag},
+		Flags: []cli.Flag{bucketFlag, dstFlag, regionFlag},
 		Action: func(c *cli.Context) {
 
 			bucket := c.String(bucketFlag.Name)
 			dest := c.String(dstFlag.Name)
 			regionName := c.String(regionFlag.Name)
-			dedup := c.Bool(dedupFlag.Name)
 
 			region, validRegion := aws.Regions[regionName]
 
@@ -93,7 +91,7 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 
 			logrus.Info("starting command", c.Command.Name)
 
-			err := list.List(s3.New(auth, region), bucket, gw, dedup)
+			err := list.List(s3.New(auth, region), bucket, gw)
 			if err != nil {
 				logrus.WithField("error", err).Error("failed to list bucket")
 			}
