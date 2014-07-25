@@ -29,11 +29,6 @@
 //  3: there were no followers, and workset is empty.
 //     loop will stop because no further results are expected.
 //
-// If `dedup` is set, the search will track all visited nodes and avoid
-// cycles. This will consume a lot more memory, but can avoid duplicate
-// references to keys. Those duplicates are rare (<1000 over 40 millions).
-// If we accept that duplicates occur, we can save a lot of memory by
-// avoiding to track the set of visited edges (>40millions such edges).
 package list
 
 import (
@@ -138,6 +133,7 @@ func List(sss *s3.S3, bucket, prefix string, dst io.Writer) error {
 	logrus.WithField("bucket_source", bucket).Info("starting the listing of all keys in bucket")
 	lister := listTask{}
 	err := lister.listAllKeys(sss, bucket, prefix, func(k s3.Key) { keys <- k })
+
 	// wait until the file writer is done
 	logrus.Info("done listing, waiting for key encoder to finish")
 	close(keys)

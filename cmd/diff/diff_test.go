@@ -62,8 +62,6 @@ func TestCanDiffOldEmptyNewIsNotKeySets(t *testing.T) {
 
 func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 	// setup
-	logrus.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldKeys := []s3.Key{{ETag: "1"}, {ETag: "3"}}
 	newKeys := []s3.Key{{ETag: "1"}, {ETag: "2"}, {ETag: "3"}}
 	want := []s3.Key{{ETag: "2"}}
@@ -89,8 +87,6 @@ func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 
 func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 	// setup
-	logrus.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldKeys := []s3.Key{{ETag: "1"}, {ETag: "3"}}
 	newKeys := []s3.Key{{ETag: "1"}, {ETag: "2"}, {ETag: "3"}}
 	want := []s3.Key{{ETag: "2"}}
@@ -117,12 +113,9 @@ func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 // context builders
 
 func testDiff(t *testing.T, oldKeys, newKeys, want []s3.Key) {
-	logrus.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldList := encodeKeys(oldKeys)
 	newList := encodeKeys(newKeys)
 	testDiffReaders(t, oldList, newList, want)
-
 }
 
 func testDiffReaders(t *testing.T, oldkeys, newkeys io.Reader, want []s3.Key) {
@@ -167,19 +160,6 @@ func lastErrReader(r io.Reader, lastReadErr error) io.Reader {
 			return n, lastReadErr
 		}
 		return n, err
-	})
-}
-
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
 	})
 }
 

@@ -15,7 +15,6 @@ import (
 )
 
 func TestCanListBucket(t *testing.T) {
-
 	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
 		return list.List(s3.S3(), bkt.Name(), "/", w)
 	})
@@ -92,21 +91,6 @@ func checkKeys(t *testing.T, truth []s3.Key, gotKeybuf io.Reader) {
 			t.Errorf("want key %q, got %q", wantKey.Key, gotKey.Key)
 		}
 	}
-}
-
-// helpers
-
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
-	})
 }
 
 // decode s3 keys from a json reader, fatals on error

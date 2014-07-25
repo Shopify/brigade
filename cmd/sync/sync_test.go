@@ -250,21 +250,6 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 	}
 }
 
-// helpers
-
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
-	})
-}
-
 // encode s3 keys from a json writer, fatals on error
 func encodeKeys(keys []s3.Key) *bytes.Buffer {
 	out := bytes.NewBuffer(nil)
