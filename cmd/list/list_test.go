@@ -16,7 +16,7 @@ import (
 
 func TestCanListBucket(t *testing.T) {
 	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
-		return list.List(s3.S3(), "s3://"+bkt.Name(), w, true)
+		return list.List(s3.S3(), "s3://"+bkt.Name(), w)
 	})
 }
 
@@ -42,7 +42,7 @@ func TestCanHandleS3Errors(t *testing.T) {
 	// - it will be abandoned once
 	wantAbandon := 1
 
-	err := list.List(mockS3.S3(), "s3://"+mockBkt.Name(), ioutil.Discard, true)
+	err := list.List(mockS3.S3(), "s3://"+mockBkt.Name(), ioutil.Discard)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

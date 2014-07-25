@@ -28,12 +28,6 @@
 //
 //  3: there were no followers, and workset is empty.
 //     loop will stop because no further results are expected.
-//
-// If `dedup` is set, the search will track all visited nodes and avoid
-// cycles. This will consume a lot more memory, but can avoid duplicate
-// references to keys. Those duplicates are rare (<1000 over 40 millions).
-// If we accept that duplicates occur, we can save a lot of memory by
-// avoiding to track the set of visited edges (>40millions such edges).
 package list
 
 import (
@@ -108,9 +102,8 @@ var metrics = struct {
 	jobsAbandoned: expvar.NewInt("brigade.list.jobsAbandoned"),
 }
 
-// List an s3 bucket and write the keys in JSON form to dst. If dedup, will
-// deduplicate all keys using a set (consumes more memory).
-func List(sss *s3.S3, src string, dst io.Writer, dedup bool) error {
+// List an s3 bucket and write the keys in JSON form to dst.
+func List(sss *s3.S3, src string, dst io.Writer) error {
 
 	srcU, srcErr := url.Parse(src)
 	if srcErr != nil {
@@ -142,7 +135,7 @@ func List(sss *s3.S3, src string, dst io.Writer, dedup bool) error {
 
 	logrus.WithField("bucket_source", srcU).Info("starting the listing of all keys in bucket")
 	lister := listTask{}
-	err := lister.listAllKeys(sss, srcU, dedup, func(k s3.Key) { keys <- k })
+	err := lister.listAllKeys(sss, srcU, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
 	logrus.Info("done listing, waiting for key encoder to finish")
 	close(keys)
@@ -153,14 +146,14 @@ func List(sss *s3.S3, src string, dst io.Writer, dedup bool) error {
 	return nil
 }
 
-func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key s3.Key)) error {
+func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, f func(key s3.Key)) error {
 
 	srcBkt := sss.Bucket(src.Host)
 
 	var count uint64
 	var size uint64
 	start := time.Now()
-	err := l.walkPath(srcBkt, src.Path, dedup, func(key s3.Key) {
+	err := l.walkPath(srcBkt, src.Path, func(key s3.Key) {
 		count++
 		size += uint64(key.Size)
 		f(key)
@@ -176,7 +169,7 @@ func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, dedup bool, f func(key 
 	return err
 }
 
-func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor func(key s3.Key)) error {
+func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.Key)) error {
 
 	// Data structures needed for the DF traversal
 	fringe := make(chan *Job, Concurrency)
@@ -260,9 +253,9 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 			metrics.jobsOk.Add(1)
 		}
 
-		l.visitKeys(doneJob.keys, keyVisitor, dedup, visited)
+		l.visitKeys(doneJob.keys, keyVisitor, visited)
 
-		for _, job := range l.jobsFromFollowers(doneJob.followers, workSet, dedup, visited) {
+		for _, job := range l.jobsFromFollowers(doneJob.followers, workSet, visited) {
 			followers.Add(job)
 		}
 	}
@@ -281,15 +274,13 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, dedup bool, keyVisitor 
 	return nil
 }
 
-func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, visited map[string]struct{}) {
+func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), visited map[string]struct{}) {
 	for _, key := range keys {
-		if dedup {
-			if _, ok := visited[key.Key]; ok {
-				logrus.WithField("key", key).Printf("deduplicate key")
-				continue
-			}
-			visited[key.Key] = struct{}{}
+		if _, ok := visited[key.Key]; ok {
+			logrus.WithField("key", key).Printf("deduplicate key")
+			continue
 		}
+		visited[key.Key] = struct{}{}
 		metrics.totalKeys.Add(1)
 		metrics.totalBucketSize.Add(int64(key.Size))
 
@@ -297,27 +288,23 @@ func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), dedup bool, vi
 	}
 }
 
-func (l *listTask) jobsFromFollowers(newFollowers []string, workset *jobSet, dedup bool, visited map[string]struct{}) []*Job {
+func (l *listTask) jobsFromFollowers(newFollowers []string, workset *jobSet, visited map[string]struct{}) []*Job {
 	var newJobs []*Job
 	for _, follow := range newFollowers {
 		// prepare a new job, add it to the worker set and
 		// send it to workers
 		newjob := newJob(follow)
 
-		if dedup {
-			if _, ok := visited[newjob.path]; ok {
-				logrus.WithField("path", newjob.path).Warn("duplicate job path")
-				continue
-			}
+		if _, ok := visited[newjob.path]; ok {
+			logrus.WithField("path", newjob.path).Warn("duplicate job path")
+			continue
 		}
 
 		// don't send jobs for paths we already planned to explore
 		if workset.Contains(newjob) {
 			// already queued
 		} else {
-			if dedup {
-				visited[newjob.path] = struct{}{}
-			}
+			visited[newjob.path] = struct{}{}
 			workset.Add(newjob)
 			newJobs = append(newJobs, newjob)
 		}
