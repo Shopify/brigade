@@ -50,7 +50,7 @@ deploy: test
 	# Compile
 	GOARCH=amd64 GOOS=linux godep go build -ldflags=$(GOLDFLAGS) -o brigade
 	# Copy binaries
-	@scp $(SSHKEY) brigade $(DEPLOY_HOST):~/
+	@scp brigade $(DEPLOY_HOST):~/
 	# Cleanup binaries
 	@rm brigade
 

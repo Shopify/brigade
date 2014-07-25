@@ -4,19 +4,15 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
-	"github.com/cheggaaa/pb"
-	"github.com/dustin/go-humanize"
+	"github.com/Sirupsen/logrus"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 // sliceTask slices a gzip'd, line separated JSON file into subfiles
-type sliceTask struct {
-	elog *log.Logger
-}
+type sliceTask struct{}
 
 // subfile writes gzip'd content to its enclosing file.
 type subfile struct {
@@ -63,8 +59,8 @@ func (s *subfile) Close() error {
 }
 
 // Slice creates n subparts from the gzip'd JSON file at `filename`.
-func Slice(el *log.Logger, filename string, n int) (filenames []string, err error) {
-	slicer := sliceTask{elog: el}
+func Slice(filename string, n int) (filenames []string, err error) {
+	slicer := sliceTask{}
 
 	// open the input file
 	inputfile, size, err := open(filename)
@@ -74,14 +70,17 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 	defer func() { err = inputfile.Close() }()
 
 	// create n subfiles to which we will write
-	log.Printf("creating %d output files", n)
+	logrus.WithField("file_count", n).Info("creating output files")
 	basename := filepath.Base(filename)
 	subfiles := make([]*subfile, 0, n)
 	// close them all, log errors but report only the last one
 	defer func() {
 		for _, out := range subfiles {
 			if cerr := out.Close(); cerr != nil {
-				el.Print(err)
+				logrus.WithFields(logrus.Fields{
+					"error":    err,
+					"filename": out.name,
+				}).Error("closing output file")
 				err = cerr
 			}
 		}
@@ -105,16 +104,19 @@ func Slice(el *log.Logger, filename string, n int) (filenames []string, err erro
 	go slicer.multiplexLines(lines, subfiles, doneWrite)
 
 	// start feeding lines to the line multiplexer
-	log.Printf("reading lines from %q (%s)", filename, humanize.Bytes(uint64(size)))
-	if err := readLines(inputfile, size, lines); err != nil {
-		el.Printf("reading lines from input failed: %v", err)
+	logrus.WithFields(logrus.Fields{
+		"filename": filename,
+		"size":     size,
+	}).Info("reading lines from file")
+	if err := readLines(inputfile, lines); err != nil {
+		logrus.WithField("error", err).Error("failed to read lines from file")
 	}
-	log.Printf("done reading lines in %v", time.Since(start))
+	logrus.WithField("duration", time.Since(start)).Info("done reading lines")
 
 	// when all lines have been sent to subfiles, wait until they
 	// finish writing
 	<-doneWrite
-	log.Printf("done writing to subfiles in %v", time.Since(start))
+	logrus.WithField("duration", time.Since(start)).Info("done writing to subfiles")
 
 	return filenames, nil
 }
@@ -130,7 +132,10 @@ func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, don
 		// write the lines in a round robin way
 		_, err := outputs[outIdx].Write(line)
 		if err != nil {
-			st.elog.Printf("couldn't write to output %d: %v", outIdx, err)
+			logrus.WithFields(logrus.Fields{
+				"error":       err,
+				"output_name": outputs[outIdx].name,
+			}).Error("couldn't write to output")
 			return
 		}
 		outIdx = (outIdx + 1) % outMod
@@ -139,18 +144,11 @@ func (st *sliceTask) multiplexLines(lines <-chan []byte, outputs []*subfile, don
 
 // readLines from r, which contains gzip'd data in a line (\n) oriented
 // way. Each line of []byte is sent to the output `lines` channel
-// A progress bar is printed to stdout as the input file is read.
-func readLines(r io.Reader, size int64, lines chan<- []byte) error {
+func readLines(r io.Reader, lines chan<- []byte) error {
 	defer close(lines)
-	// wraps the reader with a progress bar, because it's convenient
-	// to know what's going on while the tool runs.
-	bar := pb.New64(size)
-	bar.ShowSpeed = true
-	bar.SetUnits(pb.U_BYTES)
-	barr := bar.NewProxyReader(r)
 
 	// gunzip the reader (proxied by the progress bar)
-	gr, err := gzip.NewReader(barr)
+	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return err
 	}
@@ -158,10 +156,8 @@ func readLines(r io.Reader, size int64, lines chan<- []byte) error {
 
 	rd := bufio.NewReader(gr)
 
-	bar.Start()
-	defer bar.FinishPrint("all lines were read")
 	var total uint64
-	defer func() { log.Printf("total decompressed size %s", humanize.Bytes(total)) }()
+	defer func() { logrus.WithField("decompressed_size", total).Info("done decompressing") }()
 
 	// reads all the `\n` separated lines until EOF
 	for {

@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/diff"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
 	"github.com/kr/pretty"
 	"io"
-	"log"
-	"os"
 	"sort"
 	"testing"
 )
@@ -63,8 +62,6 @@ func TestCanDiffOldEmptyNewIsNotKeySets(t *testing.T) {
 
 func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 	// setup
-	log.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldKeys := []s3.Key{{ETag: "1"}, {ETag: "3"}}
 	newKeys := []s3.Key{{ETag: "1"}, {ETag: "2"}, {ETag: "3"}}
 	want := []s3.Key{{ETag: "2"}}
@@ -76,7 +73,7 @@ func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 
 	// execute
 	output := bytes.NewBuffer(nil)
-	err := diff.Diff(testlogger(t), oldList, newList, output)
+	err := diff.Diff(oldList, newList, output)
 
 	// verify
 	if err == nil {
@@ -90,8 +87,6 @@ func TestCanDiffWhenOldlistIsCorrupted(t *testing.T) {
 
 func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 	// setup
-	log.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldKeys := []s3.Key{{ETag: "1"}, {ETag: "3"}}
 	newKeys := []s3.Key{{ETag: "1"}, {ETag: "2"}, {ETag: "3"}}
 	want := []s3.Key{{ETag: "2"}}
@@ -103,7 +98,7 @@ func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 
 	// execute
 	output := bytes.NewBuffer(nil)
-	err := diff.Diff(testlogger(t), oldList, newList, output)
+	err := diff.Diff(oldList, newList, output)
 
 	// verify
 	if err == nil {
@@ -118,17 +113,14 @@ func TestCanDiffWhenNewlistIsCorrupted(t *testing.T) {
 // context builders
 
 func testDiff(t *testing.T, oldKeys, newKeys, want []s3.Key) {
-	log.SetOutput(testwriter(t)) // log to testing.Log
-
 	oldList := encodeKeys(oldKeys)
 	newList := encodeKeys(newKeys)
 	testDiffReaders(t, oldList, newList, want)
-
 }
 
 func testDiffReaders(t *testing.T, oldkeys, newkeys io.Reader, want []s3.Key) {
 	output := bytes.NewBuffer(nil)
-	err := diff.Diff(testlogger(t), oldkeys, newkeys, output)
+	err := diff.Diff(oldkeys, newkeys, output)
 	if err != nil {
 		t.Fatalf("failed to diff: %v", err)
 	}
@@ -171,24 +163,6 @@ func lastErrReader(r io.Reader, lastReadErr error) io.Reader {
 	})
 }
 
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
-	})
-}
-
-// magic, a testing.T logger!
-func testlogger(t *testing.T) *log.Logger {
-	return log.New(io.MultiWriter(testwriter(t), os.Stderr), "[test]", 0)
-}
-
 // decode s3 keys from a json reader, fatals on error
 func decodeKeys(r io.Reader) []s3.Key {
 	dec := json.NewDecoder(r)
@@ -202,7 +176,7 @@ func decodeKeys(r io.Reader) []s3.Key {
 		case nil:
 			keys = append(keys, key)
 		default:
-			log.Fatalf("decoding buf, %v", err)
+			logrus.WithField("error", err).Fatal("decoding buf")
 		}
 	}
 }
@@ -214,7 +188,7 @@ func encodeKeys(keys []s3.Key) *bytes.Buffer {
 	for _, key := range keys {
 		err := enc.Encode(&key)
 		if err != nil {
-			log.Fatalf("encoding buf, %v", err)
+			logrus.WithField("error", err).Fatal("encoding buf")
 		}
 	}
 	return out

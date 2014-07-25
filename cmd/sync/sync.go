@@ -3,15 +3,13 @@ package sync
 import (
 	"bufio"
 	"encoding/json"
+	"expvar"
 	"fmt"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
-	"github.com/bmizerany/perks/quantile"
-	"github.com/dustin/go-humanize"
 	"io"
-	"log"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -38,7 +36,7 @@ func defaultSyncer(src, dst *s3.Bucket, key s3.Key) error {
 }
 
 // NewSyncTask creates a sync task that will sync keys from src onto dst.
-func NewSyncTask(el *log.Logger, src, dst *s3.Bucket) (*SyncTask, error) {
+func NewSyncTask(src, dst *s3.Bucket) (*SyncTask, error) {
 
 	// before starting the sync, make sure our s3 object is usable (credentials and such)
 	_, err := src.List("/", "/", "/", 1)
@@ -58,10 +56,8 @@ func NewSyncTask(el *log.Logger, src, dst *s3.Bucket) (*SyncTask, error) {
 		SyncPara:   200,
 		Sync:       defaultSyncer,
 
-		elog:     el,
-		src:      src,
-		dst:      dst,
-		qtStream: quantile.NewTargeted(targetP50, targetP95),
+		src: src,
+		dst: dst,
 	}, nil
 }
 
@@ -73,19 +69,32 @@ type SyncTask struct {
 	SyncPara   int
 	Sync       SyncerFunc
 
-	elog *log.Logger
-
 	src *s3.Bucket
 	dst *s3.Bucket
+}
 
-	qtStreamL sync.Mutex
-	qtStream  *quantile.Stream
+var metrics = struct {
+	fileLines   *expvar.Int
+	decodedKeys *expvar.Int
 
-	// shared stats between goroutines, use sync/atomic
-	fileLines   int64
-	decodedKeys int64
-	syncedKeys  int64
-	inflight    int64
+	inflight         *expvar.Int
+	secondsWaitingS3 *expvar.Float
+
+	syncAttempted *expvar.Int
+	syncOk        *expvar.Int
+	syncRetries   *expvar.Int
+	syncAbandoned *expvar.Int
+}{
+	fileLines:   expvar.NewInt("brigade.sync.fileLines"),
+	decodedKeys: expvar.NewInt("brigade.sync.decodedKeys"),
+
+	inflight:         expvar.NewInt("brigade.sync.inflight"),
+	secondsWaitingS3: expvar.NewFloat("brigade.sync.secondsWaitingS3"),
+
+	syncAttempted: expvar.NewInt("brigade.sync.syncAttempted"),
+	syncOk:        expvar.NewInt("brigade.sync.syncOk"),
+	syncRetries:   expvar.NewInt("brigade.sync.syncRetries"),
+	syncAbandoned: expvar.NewInt("brigade.sync.syncAbandoned"),
 }
 
 // Start the task, reading all the keys that need to be sync'd
@@ -94,9 +103,6 @@ func (s *SyncTask) Start(input io.Reader, synced, failed io.Writer) error {
 
 	start := time.Now()
 
-	ticker := time.NewTicker(time.Second)
-	go s.printProgress(ticker)
-
 	keysIn := make(chan s3.Key, s.SyncPara*BufferFactor)
 	keysOk := make(chan s3.Key, s.SyncPara*BufferFactor)
 	keysFail := make(chan s3.Key, s.SyncPara*BufferFactor)
@@ -104,7 +110,11 @@ func (s *SyncTask) Start(input io.Reader, synced, failed io.Writer) error {
 	decoders := make(chan []byte, s.DecodePara*BufferFactor)
 
 	// start JSON decoders
-	log.Printf("starting %d key decoders, buffer size %d", s.DecodePara, cap(decoders))
+	logrus.WithFields(logrus.Fields{
+		"key_decoders": s.DecodePara,
+		"buffer_size":  cap(decoders),
+	}).Info("starting key decoders")
+
 	decGroup := sync.WaitGroup{}
 	for i := 0; i < s.DecodePara; i++ {
 		decGroup.Add(1)
@@ -112,7 +122,10 @@ func (s *SyncTask) Start(input io.Reader, synced, failed io.Writer) error {
 	}
 
 	// start S3 sync workers
-	log.Printf("starting %d key sync workers, buffer size %d", s.SyncPara, cap(keysIn))
+	logrus.WithFields(logrus.Fields{
+		"sync_workers": s.SyncPara,
+		"buffer_size":  cap(keysIn),
+	}).Info("starting key sync workers")
 	syncGroup := sync.WaitGroup{}
 	for i := 0; i < s.SyncPara; i++ {
 		syncGroup.Add(1)
@@ -120,28 +133,31 @@ func (s *SyncTask) Start(input io.Reader, synced, failed io.Writer) error {
 	}
 
 	// track keys that have been sync'd, and those that we failed to sync.
-	log.Printf("starting to write progress")
+	logrus.Info("starting to write progress")
 	encGroup := sync.WaitGroup{}
 	encGroup.Add(2)
 	go s.encode(&encGroup, synced, keysOk)
 	go s.encode(&encGroup, failed, keysFail)
 
 	// feed the pipeline by reading the listing file
-	log.Printf("starting to read key listing file")
+	logrus.Info("starting to read key listing file")
 	err := s.readLines(input, decoders)
 
 	// when done reading the source file, wait until the decoders
 	// are done.
-	log.Printf("%v: done reading %s lines",
-		time.Since(start),
-		humanize.Comma(atomic.LoadInt64(&s.fileLines)))
+	logrus.WithFields(logrus.Fields{
+		"since_start": time.Since(start),
+		"line_count":  metrics.fileLines.String(),
+	}).Info("done reading lines from sync list")
 	close(decoders)
 	decGroup.Wait()
 
 	// when the decoders are all done, wait for the sync workers to finish
-	log.Printf("%v: done decoding %s keys",
-		time.Since(start),
-		humanize.Comma(atomic.LoadInt64(&s.decodedKeys)))
+
+	logrus.WithFields(logrus.Fields{
+		"since_start": time.Since(start),
+		"line_count":  metrics.decodedKeys.String(),
+	}).Info("done decoding keys from sync list")
 
 	close(keysIn)
 	syncGroup.Wait()
@@ -151,34 +167,14 @@ func (s *SyncTask) Start(input io.Reader, synced, failed io.Writer) error {
 
 	encGroup.Wait()
 
-	ticker.Stop()
-
 	// the source file is read, all keys were decoded and sync'd. we're done.
-	log.Printf("%v: done syncing %s keys",
-		time.Since(start),
-		humanize.Comma(atomic.LoadInt64(&s.syncedKeys)))
+	logrus.WithFields(logrus.Fields{
+		"since_start": time.Since(start),
+		"sync_ok":     metrics.syncOk.String(),
+		"sync_fail":   metrics.syncAbandoned.String(),
+	}).Info("done syncing keys")
 
 	return err
-}
-
-// prints progress and stats as we go, handy to figure out what's going on
-// and how the tool performs.
-func (s *SyncTask) printProgress(tick *time.Ticker) {
-	for _ = range tick.C {
-		s.qtStreamL.Lock()
-		p50, p95 := s.qtStream.Query(targetP50), s.qtStream.Query(targetP95)
-		s.qtStream.Reset()
-		s.qtStreamL.Unlock()
-
-		log.Printf("fileLines=%s\tdecodedKeys=%s\tsyncedKeys=%s\tinflight=%d/%d\tsync-p50=%v\tsync-p95=%v",
-			humanize.Comma(atomic.LoadInt64(&s.fileLines)),
-			humanize.Comma(atomic.LoadInt64(&s.decodedKeys)),
-			humanize.Comma(atomic.LoadInt64(&s.syncedKeys)),
-			atomic.LoadInt64(&s.inflight), s.SyncPara,
-			time.Duration(p50),
-			time.Duration(p95),
-		)
-	}
 }
 
 // reads all the \n separated lines from a file, write them (without \n) to
@@ -198,7 +194,7 @@ func (s *SyncTask) readLines(input io.Reader, decoders chan<- []byte) error {
 		}
 
 		decoders <- line
-		atomic.AddInt64(&s.fileLines, 1)
+		metrics.fileLines.Add(1)
 	}
 }
 
@@ -209,10 +205,10 @@ func (s *SyncTask) decode(wg *sync.WaitGroup, lines <-chan []byte, keys chan<- s
 	for line := range lines {
 		err := json.Unmarshal(line, &key)
 		if err != nil {
-			s.elog.Printf("unmarshaling line: %v", err)
+			logrus.WithField("error", err).Fatal("failed to unmarshal s3.Key from line")
 		} else {
 			keys <- key
-			atomic.AddInt64(&s.decodedKeys, 1)
+			metrics.decodedKeys.Add(1)
 		}
 	}
 }
@@ -224,7 +220,12 @@ func (s *SyncTask) encode(wg *sync.WaitGroup, dst io.Writer, keys <-chan s3.Key)
 	for key := range keys {
 		err := enc.Encode(key)
 		if err != nil {
-			s.elog.Fatalf("encoding %q to JSON: %v", key.Key, err)
+			// panic so that someone come look at why the destination can't be
+			// written to, with a stack trace to help
+			logrus.WithFields(logrus.Fields{
+				"error": err,
+				"key":   key,
+			}).Panic("failed to encode s3.Key to output, bailing")
 		}
 	}
 }
@@ -239,19 +240,28 @@ func (s *SyncTask) syncKey(wg *sync.WaitGroup, src, dst *s3.Bucket, keys <-chan 
 		retries, err := s.syncOrRetry(src, dst, key)
 		// If we exhausted MaxRetry, log the error to the error log
 		if err != nil {
+			metrics.syncAbandoned.Add(1)
 			failed <- key
 
-			s.elog.Printf("failed %d times to sync %q", retries, key.Key)
+			entry := logrus.WithFields(logrus.Fields{
+				"retries": retries,
+				"key":     key,
+				"error":   err,
+			})
+
 			switch e := err.(type) {
 			case *s3.Error: // cannot be abort worthy at this point
-				s.elog.Printf("s3-error-code=%q\ts3-error-msg=%q\tkey=%q", e.Code, e.Message, key.Key)
+				entry.WithFields(logrus.Fields{
+					"s3_code":    e.Code,
+					"s3_message": e.Message,
+				}).Error("failed too many times to sync key, abandoned: s3.Error")
 			default:
-				s.elog.Printf("other-error=%#v\tkey=%q", e, key.Key)
+				entry.Error("failed too many times to sync key, abandoned: unexpected error")
 			}
 
 		} else {
+			metrics.syncOk.Add(1)
 			synced <- key
-			atomic.AddInt64(&s.syncedKeys, 1)
 		}
 	}
 }
@@ -267,12 +277,12 @@ func (s *SyncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
 
 		// do a put copy call (sync directly from bucket to another
 		// without fetching the content locally)
-		atomic.AddInt64(&s.inflight, 1)
+		metrics.syncAttempted.Add(1)
+		metrics.inflight.Add(1)
 		err = s.Sync(src, dst, key)
-		atomic.AddInt64(&s.inflight, -1)
-		s.qtStreamL.Lock()
-		s.qtStream.Insert(float64(time.Since(start).Nanoseconds()))
-		s.qtStreamL.Unlock()
+		metrics.inflight.Add(-1)
+
+		metrics.secondsWaitingS3.Add(time.Since(start).Seconds())
 
 		switch e := err.(type) {
 		case nil:
@@ -283,26 +293,42 @@ func (s *SyncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
 			if shouldAbort(e) {
 				// abort if its an error that will occur for all future calls
 				// such as bad auth, or the bucket not existing anymore (that'd be bad!)
-				s.elog.Fatalf("abort-worthy-error=%q\terror-msg=%q\tkey=%#v", e.Code, e.Message, key)
+				logrus.WithFields(logrus.Fields{
+					"key":        key,
+					"s3_code":    e.Code,
+					"s3_message": e.Message,
+				}).Fatal("abort worthy error, should not continue to sync before issue is resolved")
 			}
 			if !shouldRetry(e) {
 				// give up on that key if it's not retriable, such as a key
 				// that was deleted
-				s.elog.Printf("unretriable-error=%q\terror-msg=%q\tkey=%q", e.Code, e.Message, key.Key)
+				logrus.WithFields(logrus.Fields{
+					"key":        key,
+					"s3_code":    e.Code,
+					"s3_message": e.Message,
+				}).Warn("unretriable error")
 				return retry, e
 			}
 			// carry on to retry
 		default:
 			// carry on to retry
 		}
-
 		// log that we sleep, but don't log the error itself just
 		// yet (to avoid logging transient network errors that are
 		// recovered by retrying)
+		metrics.syncRetries.Add(1)
 		sleepFor := s.RetryBase * time.Duration(retry)
-		s.elog.Printf("worker-sleep-on-retryiable-error=%v", sleepFor)
+		logrus.WithFields(logrus.Fields{
+			"sleep":     sleepFor,
+			"retry":     retry,
+			"max_retry": s.MaxRetry,
+		}).Warn("sleeping on retryable error")
 		time.Sleep(sleepFor)
-		s.elog.Printf("worker-wake-up, retries=%d/%d", retry, s.MaxRetry)
+		logrus.WithFields(logrus.Fields{
+			"sleep":     sleepFor,
+			"retry":     retry,
+			"max_retry": s.MaxRetry,
+		}).Info("sleeping on retryable error")
 
 	}
 	return retry, err

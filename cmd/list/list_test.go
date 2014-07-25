@@ -5,43 +5,29 @@ import (
 	"encoding/json"
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/s3mock"
+	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
 	"io"
 	"io/ioutil"
-	"log"
-	"os"
 	"sort"
 	"testing"
 	"time"
 )
 
-func TestCanListBucketWithoutDedup(t *testing.T) {
-	dedup := false
-	elog := testlogger(t)
+func TestCanListBucket(t *testing.T) {
 	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
-		return list.List(elog, s3.S3(), "s3://"+bkt.Name(), w, dedup)
-	})
-
-}
-
-func TestCanListBucketWithDedup(t *testing.T) {
-	dedup := true
-	elog := testlogger(t)
-	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
-		return list.List(elog, s3.S3(), "s3://"+bkt.Name(), w, dedup)
+		return list.List(s3.S3(), bkt.Name(), "/", w)
 	})
 }
 
 func TestCanHandleS3Errors(t *testing.T) {
-	// mute the standard output
-	log.SetOutput(testwriter(t))
 
 	mockBkt := s3mock.NewPerfBucket(t)
 	mockS3 := s3mock.NewMock(t).Seed(mockBkt)
 
 	// log the output to a buffer
 	errout := bytes.NewBuffer(nil)
-	elog := log.New(errout, "[error] ", 0)
+	logrus.SetOutput(errout)
 	// will sleep for ~1s total, giving a chance to print 1 report
 	list.MaxRetry = 5
 	list.InitRetry = time.Millisecond * 8
@@ -56,7 +42,7 @@ func TestCanHandleS3Errors(t *testing.T) {
 	// - it will be abandoned once
 	wantAbandon := 1
 
-	err := list.List(elog, mockS3.S3(), "s3://"+mockBkt.Name(), ioutil.Discard, true)
+	err := list.List(mockS3.S3(), mockBkt.Name(), "/", ioutil.Discard)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -78,7 +64,6 @@ func TestCanHandleS3Errors(t *testing.T) {
 // test context builders
 
 func withPerfBucket(t *testing.T, f func(*testing.T, *s3mock.MockS3, s3mock.MockBucket, io.Writer) error) {
-	log.SetOutput(testwriter(t))
 
 	mockBkt := s3mock.NewPerfBucket(t)
 	mockS3 := s3mock.NewMock(t).Seed(mockBkt)
@@ -108,26 +93,6 @@ func checkKeys(t *testing.T, truth []s3.Key, gotKeybuf io.Reader) {
 	}
 }
 
-// helpers
-
-// io.Writer implementer
-type writer func(p []byte) (int, error)
-
-func (w writer) Write(p []byte) (int, error) { return w(p) }
-
-// magic, a testing.T writer!
-func testwriter(t *testing.T) io.Writer {
-	return writer(func(p []byte) (int, error) {
-		t.Log(string(p))
-		return 0, nil
-	})
-}
-
-// magic, a testing.T logger!
-func testlogger(t *testing.T) *log.Logger {
-	return log.New(io.MultiWriter(testwriter(t), os.Stderr), "[test]", 0)
-}
-
 // decode s3 keys from a json reader, fatals on error
 func decodeKeys(r io.Reader) []s3.Key {
 	dec := json.NewDecoder(r)
@@ -141,7 +106,7 @@ func decodeKeys(r io.Reader) []s3.Key {
 		case nil:
 			keys = append(keys, key)
 		default:
-			log.Fatalf("decoding buf, %v", err)
+			logrus.WithField("error", err).Fatal("decoding buf")
 		}
 	}
 }
