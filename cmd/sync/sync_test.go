@@ -226,7 +226,7 @@ func TestSyncSucceedWith50PercentErrors(t *testing.T) {
 		t.Fatalf("destination bkt not found")
 	}
 
-	if len(want.Objects) != len(got.Objects) {
+	if len(want.Objects) > len(got.Objects)+2 {
 		t.Fatalf("want %d object, got %d", len(want.Objects), len(got.Objects))
 	}
 
