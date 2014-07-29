@@ -71,20 +71,15 @@ func (b *Backup) Cleanup() error {
 		if file == nil {
 			continue
 		}
+		localLog := logrus.WithField("filename", file.Name())
 		if err := file.Close(); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"error":    err,
-				"filename": file.Name(),
-			}).Error("closing file")
+			localLog.WithField("error", err).Error("closing file")
 			if cerr == nil {
 				cerr = err
 			}
 		}
 		if err := os.Remove(file.Name()); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"error":    err,
-				"filename": file.Name(),
-			}).Error("removing file")
+			localLog.WithField("error", err).Error("removing file")
 			if cerr == nil {
 				cerr = err
 			}
