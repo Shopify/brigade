@@ -9,7 +9,6 @@ import (
 	"github.com/Shopify/brigade/cmd/slice"
 	"github.com/Shopify/brigade/cmd/sync"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/aws"
 	"github.com/aybabtme/goamz/s3"
 	"github.com/codegangsta/cli"
 	"io"
@@ -50,24 +49,6 @@ func mustURL(c *cli.Context, f cli.StringFlag) *url.URL {
 	return u
 }
 
-func mustRegion(c *cli.Context, f cli.StringFlag) aws.Region {
-	s := mustString(c, f)
-	r, ok := aws.Regions[s]
-	if !ok {
-		var valids []string
-		for key := range aws.Regions {
-			valids = append(valids, key)
-		}
-
-		cli.ShowCommandHelp(c, c.Command.Name)
-		logrus.WithFields(logrus.Fields{
-			"url":           s,
-			"valid_regions": valids,
-		}).Fatal("not a valid AWS region")
-	}
-	return r
-}
-
 func mustString(c *cli.Context, f cli.StringFlag) string {
 	s := c.String(f.Name)
 	if s == "" && f.Value == "" {
@@ -77,13 +58,35 @@ func mustString(c *cli.Context, f cli.StringFlag) string {
 	return s
 }
 
+func mustConfig(c *cli.Context, f cli.StringFlag) *Config {
+	filename := mustString(c, f)
+	file, err := os.Open(filename)
+	if err != nil {
+		cli.ShowCommandHelp(c, c.Command.Name)
+		logrus.WithField("error", err).Fatal("could not open config file")
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		logrus.WithField("error", err).Fatal("could not stat config file")
+	}
+	if stat.Mode()&0077 != 0 {
+		logrus.Fatal("bad permission on config file, should be only accessible by current user")
+	}
+
+	cfg, err := LoadConfig(file)
+	if err != nil {
+		cli.ShowCommandHelp(c, c.Command.Name)
+		logrus.WithField("error", err).Fatal("could not load config file")
+	}
+	return cfg
+}
+
 func listCommand() cli.Command {
 
 	var (
-		accessFlag = cli.StringFlag{Name: "access", Usage: "AWS access key to source bucket"}
-		secretFlag = cli.StringFlag{Name: "secret", Usage: "AWS secret key to source bucket"}
-		regionFlag = cli.StringFlag{Name: "region", Usage: "region of source bucket to get the keys from"}
-
+		configFlag = cli.StringFlag{Name: "config", Usage: "JSON file containing AWS keys"}
 		bucketFlag = cli.StringFlag{Name: "bucket", Value: "", Usage: "path to bucket to list, of the form s3://name/path/"}
 		destFlag   = cli.StringFlag{Name: "dest", Value: "bucket_list.json.gz", Usage: "filename to which the list of keys is saved"}
 	)
@@ -95,20 +98,17 @@ func listCommand() cli.Command {
 Do a traversal of the S3 bucket using many concurrent workers. The result of
 traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 		Flags: []cli.Flag{
-			accessFlag,
-			secretFlag,
+			configFlag,
 			bucketFlag,
 			destFlag,
-			regionFlag,
 		},
 		Action: func(c *cli.Context) {
 
+			cfg := mustConfig(c, configFlag)
 			bkt := mustURL(c, bucketFlag)
 			dest := mustString(c, destFlag)
-			srcS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, accessFlag),
-				SecretKey: mustString(c, secretFlag),
-			}, mustRegion(c, regionFlag))
+
+			srcS3 := s3.New(cfg.Source.AWS())
 
 			file, dsterr := os.Create(dest)
 			if dsterr != nil {
@@ -136,13 +136,7 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 
 func syncCommand() cli.Command {
 	var (
-		srcAccess = cli.StringFlag{Name: "src-access", Usage: "AWS access key to source bucket"}
-		srcSecret = cli.StringFlag{Name: "src-secret", Usage: "AWS secret key to source bucket"}
-		srcRegion = cli.StringFlag{Name: "src-region", Usage: "region of source bucket to get the keys from"}
-
-		destAccess = cli.StringFlag{Name: "dest-access", Usage: "AWS access key to destination bucket"}
-		destSecret = cli.StringFlag{Name: "dest-secret", Usage: "AWS secret key to destination bucket"}
-		destRegion = cli.StringFlag{Name: "dest-region", Usage: "region of destination bucket to write the keys to"}
+		configFlag = cli.StringFlag{Name: "config", Usage: "JSON file containing AWS keys"}
 
 		inputFlag       = cli.StringFlag{Name: "input", Usage: "name of the file containing the list of keys to sync"}
 		successFlag     = cli.StringFlag{Name: "success", Usage: "name of the output file where to write the list of keys that succeeded to sync, defaults to /dev/null"}
@@ -159,12 +153,7 @@ func syncCommand() cli.Command {
 Reads the keys from an s3 key listing and sync them one by one from a source
 bucket to a destination bucket.`),
 		Flags: []cli.Flag{
-			srcAccess,
-			srcSecret,
-			srcRegion,
-			destAccess,
-			destSecret,
-			destRegion,
+			configFlag,
 			inputFlag,
 			successFlag,
 			failureFlag,
@@ -177,20 +166,15 @@ bucket to a destination bucket.`),
 			inputFilename := mustString(c, inputFlag)
 			successFilename := mustString(c, successFlag)
 			failureFilename := mustString(c, failureFlag)
+			cfg := mustConfig(c, configFlag)
 			src := mustURL(c, srcFlag)
 			dest := mustURL(c, dstFlag)
 			conc := c.Int(concurrencyFlag.Name)
 
-			srcS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, srcAccess),
-				SecretKey: mustString(c, srcSecret),
-			}, mustRegion(c, srcRegion))
+			srcS3 := s3.New(cfg.Source.AWS())
 			srcBkt := srcS3.Bucket(src.Host)
 
-			destS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, destAccess),
-				SecretKey: mustString(c, destSecret),
-			}, mustRegion(c, destRegion))
+			destS3 := s3.New(cfg.Destination.AWS())
 			destBkt := destS3.Bucket(dest.Host)
 
 			listfile, err := os.Open(inputFilename)
@@ -406,17 +390,7 @@ func backupCommand() cli.Command {
 		destFlag  = cli.StringFlag{Name: "dest", Usage: "destination bucket to put the keys into"}
 		stateFlag = cli.StringFlag{Name: "state", Usage: "state bucket where artifacts of backups are held"}
 
-		srcAccess = cli.StringFlag{Name: "src-access", Usage: "AWS access key to source bucket"}
-		srcSecret = cli.StringFlag{Name: "src-secret", Usage: "AWS secret key to source bucket"}
-		srcRegion = cli.StringFlag{Name: "src-region", Usage: "region of source bucket to get the keys from"}
-
-		destAccess = cli.StringFlag{Name: "dest-access", Usage: "AWS access key to destination bucket"}
-		destSecret = cli.StringFlag{Name: "dest-secret", Usage: "AWS secret key to destination bucket"}
-		destRegion = cli.StringFlag{Name: "dest-region", Usage: "region of destination bucket to write the keys to"}
-
-		stateAccess = cli.StringFlag{Name: "state-access", Usage: "AWS access key to state bucket"}
-		stateSecret = cli.StringFlag{Name: "state-secret", Usage: "AWS secret key to state bucket"}
-		stateRegion = cli.StringFlag{Name: "state-region", Usage: "region of state bucket to persist artifacts into"}
+		configFlag = cli.StringFlag{Name: "config", Usage: "JSON file containing AWS keys"}
 	)
 
 	return cli.Command{
@@ -427,41 +401,25 @@ Executes list, diff and sync one after another. It works against a
 'state' s3 bucket, which contains past backups and where this backup
 will store its output.`),
 		Flags: []cli.Flag{
+			configFlag,
 			srcFlag,
 			destFlag,
 			stateFlag,
-			srcAccess,
-			srcSecret,
-			srcRegion,
-			destAccess,
-			destSecret,
-			destRegion,
-			stateAccess,
-			stateSecret,
-			stateRegion,
 		},
 		Action: func(c *cli.Context) {
 
+			cfg := mustConfig(c, configFlag)
 			src := mustURL(c, srcFlag)
 			dest := mustURL(c, destFlag)
 			state := mustURL(c, stateFlag)
 
-			srcS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, srcAccess),
-				SecretKey: mustString(c, srcSecret),
-			}, mustRegion(c, srcRegion))
+			srcS3 := s3.New(cfg.Source.AWS())
 			srcBkt := srcS3.Bucket(src.Host)
 
-			destS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, destAccess),
-				SecretKey: mustString(c, destSecret),
-			}, mustRegion(c, destRegion))
+			destS3 := s3.New(cfg.Destination.AWS())
 			destBkt := destS3.Bucket(dest.Host)
 
-			stateS3 := s3.New(aws.Auth{
-				AccessKey: mustString(c, stateAccess),
-				SecretKey: mustString(c, stateSecret),
-			}, mustRegion(c, stateRegion))
+			stateS3 := s3.New(cfg.State.AWS())
 			stateBkt := stateS3.Bucket(state.Host)
 
 			logrus.Info("starting command ", c.Command.Name)

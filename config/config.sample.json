@@ -1,0 +1,17 @@
+{
+    "source_bucket" : {
+        "aws_region": "us-east-1",
+        "aws_access_key": "derp access key",
+        "aws_secret_key": "derp secret key"
+    },
+    "destination_bucket" : {
+        "aws_region": "us-east-1",
+        "aws_access_key": "derp access key",
+        "aws_secret_key": "derp secret key"
+    },
+    "state_bucket" : {
+        "aws_region": "us-east-1",
+        "aws_access_key": "derp access key",
+        "aws_secret_key": "derp secret key"
+    }
+}
