@@ -103,12 +103,7 @@ var metrics = struct {
 }
 
 // List an s3 bucket and write the keys in JSON form to dst.
-func List(sss *s3.S3, src string, dst io.Writer) error {
-
-	srcU, srcErr := url.Parse(src)
-	if srcErr != nil {
-		return fmt.Errorf("not a valid bucket URL: %v", srcErr)
-	}
+func List(sss *s3.S3, bucket, prefix string, dst io.Writer) error {
 
 	keys := make(chan s3.Key, Concurrency)
 
@@ -133,9 +128,9 @@ func List(sss *s3.S3, src string, dst io.Writer) error {
 	// list all the keys in the source bucket, sending each key to the
 	// file writer worker.
 
-	logrus.WithField("bucket_source", srcU).Info("starting the listing of all keys in bucket")
+	logrus.WithField("bucket_source", bucket).Info("starting the listing of all keys in bucket")
 	lister := listTask{}
-	err := lister.listAllKeys(sss, srcU, func(k s3.Key) { keys <- k })
+	err := lister.listAllKeys(sss, bucket, prefix, func(k s3.Key) { keys <- k })
 	// wait until the file writer is done
 	logrus.Info("done listing, waiting for key encoder to finish")
 	close(keys)
@@ -146,21 +141,21 @@ func List(sss *s3.S3, src string, dst io.Writer) error {
 	return nil
 }
 
-func (l *listTask) listAllKeys(sss *s3.S3, src *url.URL, f func(key s3.Key)) error {
+func (l *listTask) listAllKeys(sss *s3.S3, bucket, prefix string, f func(key s3.Key)) error {
 
-	srcBkt := sss.Bucket(src.Host)
+	srcBkt := sss.Bucket(bucket)
 
 	var count uint64
 	var size uint64
 	start := time.Now()
-	err := l.walkPath(srcBkt, src.Path, func(key s3.Key) {
+	err := l.walkPath(srcBkt, prefix, func(key s3.Key) {
 		count++
 		size += uint64(key.Size)
 		f(key)
 	})
 
 	logrus.WithFields(logrus.Fields{
-		"bucket_source":       src,
+		"bucket_source":       bucket,
 		"bucket_object_count": count,
 		"duration":            time.Since(start),
 		"bucket_total_size":   size,

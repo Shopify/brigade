@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/aws"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,11 +22,6 @@ func main() {
 
 	// use all cores
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	auth, err := aws.EnvAuth()
-	if err != nil {
-		logrus.WithField("error", err).Fatal("need an AWS auth pair in AWS_ACCESS_KEY, AWS_SECRET_KEY")
-	}
 
 	// long running jobs are painful to kill by mistake
 	go func() {
@@ -58,7 +52,7 @@ func main() {
 		logrus.Fatal(http.ListenAndServe(addr, nil))
 	}()
 
-	if err := newApp(auth).Run(os.Args); err != nil {
+	if err := newApp().Run(os.Args); err != nil {
 		logrus.WithField("error", err).Error("couldn't run app")
 	}
 }
