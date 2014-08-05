@@ -8,11 +8,9 @@ GOLDFLAGS="-X main.branch $(BRANCH) -X main.commit $(COMMIT)"
 all: test build
 
 setup:
-	@go get -u code.google.com/p/go.tools/cmd/vet
-	@go get -u code.google.com/p/go.tools/cmd/cover
-	@go get -u github.com/tools/godep
-	@go get -u github.com/golang/lint/golint
-	@go get -u github.com/kisielk/errcheck
+	@go get -u "github.com/tools/godep"
+	@go get -u "github.com/golang/lint/golint"
+	@go get -u "github.com/kisielk/errcheck"
 
 # http://cloc.sourceforge.net/
 cloc:
