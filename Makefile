@@ -38,7 +38,8 @@ install: test
 
 build:
 	@echo "=== go build ==="
-	@godep go build -ldflags=$(GOLDFLAGS) -o brigade
+	@mkdir -p bin/
+	@godep go build -ldflags=$(GOLDFLAGS) -o bin/brigade
 
 test: fmt vet lint errcheck
 	@echo "=== go test ==="
@@ -46,10 +47,11 @@ test: fmt vet lint errcheck
 
 deploy: test
 	# Compile
-	GOARCH=amd64 GOOS=linux godep go build -ldflags=$(GOLDFLAGS) -o brigade
+	@mkdir -p bin/
+	GOARCH=amd64 GOOS=linux godep go build -ldflags=$(GOLDFLAGS) -o bin/brigade
 	# Copy binaries
-	@scp brigade $(DEPLOY_HOST):~/
+	@scp bin/brigade $(DEPLOY_HOST):~/
 	# Cleanup binaries
-	@rm brigade
+	@rm bin/brigade
 
 .PHONY: setup cloc errcheck vet lint fmt install build test deploy
