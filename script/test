@@ -1,0 +1,4 @@
+#!/bin/bash
+source script/env
+set -xe
+make test

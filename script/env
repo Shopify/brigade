@@ -1,0 +1,19 @@
+#!/bin/bash
+REPO_OWNER="github.com/Shopify"
+APP_NAME="brigade"
+APP_REPO="$REPO_OWNER/$APP_NAME"
+if [[ $GO_ENV == "" ]]; then
+  export GO_ENV=development
+fi
+DEFAULT_GOPATH=$(pwd)/.go
+GOPATH=${GOPATH:=$DEFAULT_GOPATH}
+export GOPATH=$GOPATH
+export GOBIN=$GOPATH/bin
+export PATH=$PATH:$GOBIN
+echo "GOPATH = $GOPATH, GOBIN = $GOBIN"
+mkdir -p $GOBIN
+mkdir -p $GOPATH/src/$REPO_OWNER
+if [ ! -d $GOPATH/src/$APP_REPO ]; then
+  ln -sfv $(pwd) $GOPATH/src/$APP_REPO
+fi
+mkdir -p .cache

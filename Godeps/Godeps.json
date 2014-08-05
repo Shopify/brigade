@@ -1,0 +1,40 @@
+{
+	"ImportPath": "github.com/Shopify/brigade",
+	"GoVersion": "go1.3",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/Sirupsen/logrus",
+			"Comment": "v0.2.0-14-gbeee753",
+			"Rev": "beee753015b78c153ea7ea90587b328a135339a2"
+		},
+		{
+			"ImportPath": "github.com/aybabtme/goamz/aws",
+			"Rev": "c7a5149efcea23ac02b576ec226704750a1d1609"
+		},
+		{
+			"ImportPath": "github.com/aybabtme/goamz/s3",
+			"Rev": "c7a5149efcea23ac02b576ec226704750a1d1609"
+		},
+		{
+			"ImportPath": "github.com/codegangsta/cli",
+			"Comment": "1.0.0-72-gbb91895",
+			"Rev": "bb9189510af1f49580c073c9e59e8bf288f0df27"
+		},
+		{
+			"ImportPath": "github.com/dustin/randbo",
+			"Rev": "7f1b564ca7242d22bcc6e2128beb90d9fa38b9f0"
+		},
+		{
+			"ImportPath": "github.com/kr/pretty",
+			"Comment": "go.weekly.2011-12-22-18-gbc9499c",
+			"Rev": "bc9499caa0f45ee5edb2f0209fbd61fbf3d9018f"
+		},
+		{
+			"ImportPath": "github.com/kr/text",
+			"Rev": "6807e777504f54ad073ecef66747de158294b639"
+		}
+	]
+}

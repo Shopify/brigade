@@ -1,0 +1,5 @@
+#!/bin/bash
+source script/env
+set -xe
+git config --global url.git@github.com:Shopify.insteadof https://github.com/Shopify
+go get -d -v ./...
