@@ -8,25 +8,25 @@ import (
 	"io"
 )
 
-// BktConfig is the information needed to create an s3.Bucket object.
-type BktConfig struct {
+// BucketConfig is the information needed to create an s3.Bucket object.
+type BucketConfig struct {
 	Region    string `json:"aws_region"`
 	AccessKey string `json:"aws_access_key"`
 	SecretKey string `json:"aws_secret_key"`
 }
 
-func (a *BktConfig) validate() error {
+func (b *BucketConfig) validate() error {
 
 	switch {
-	case a.Region == "":
+	case b.Region == "":
 		return errors.New("need an region name")
-	case a.AccessKey == "":
+	case b.AccessKey == "":
 		return errors.New("need an access key")
-	case a.SecretKey == "":
+	case b.SecretKey == "":
 		return errors.New("need a secret key")
 	}
 
-	if _, ok := aws.Regions[a.Region]; !ok {
+	if _, ok := aws.Regions[b.Region]; !ok {
 		var valids []string
 		for key := range aws.Regions {
 			valids = append(valids, key)
@@ -38,20 +38,20 @@ func (a *BktConfig) validate() error {
 }
 
 // AWS returns an auth and region object for the bucket.
-func (a *BktConfig) AWS() (aws.Auth, aws.Region) {
+func (b *BucketConfig) AWS() (aws.Auth, aws.Region) {
 	return aws.Auth{
-		AccessKey: a.AccessKey,
-		SecretKey: a.SecretKey,
-	}, aws.Regions[a.Region]
+		AccessKey: b.AccessKey,
+		SecretKey: b.SecretKey,
+	}, aws.Regions[b.Region]
 }
 
 // Config contains authentication info for the AWS buckets. We use
 // a file instead of flags to avoid showing the secrets in the process
 // name.
 type Config struct {
-	Source      BktConfig `json:"source_bucket"`
-	Destination BktConfig `json:"destination_bucket"`
-	State       BktConfig `json:"state_bucket"`
+	Source      BucketConfig `json:"source_bucket"`
+	Destination BucketConfig `json:"destination_bucket"`
+	State       BucketConfig `json:"state_bucket"`
 }
 
 func (c Config) validate() error {

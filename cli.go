@@ -71,7 +71,7 @@ func mustConfig(c *cli.Context, f cli.StringFlag) *Config {
 	if err != nil {
 		logrus.WithField("error", err).Fatal("could not stat config file")
 	}
-	if stat.Mode()&0077 != 0 {
+	if !onlyUserAccessible(stat.Mode()) {
 		logrus.Fatal("bad permission on config file, should be only accessible by current user")
 	}
 
@@ -81,6 +81,10 @@ func mustConfig(c *cli.Context, f cli.StringFlag) *Config {
 		logrus.WithField("error", err).Fatal("could not load config file")
 	}
 	return cfg
+}
+
+func onlyUserAccessible(mode os.FileMode) bool {
+	return mode&0077 == 0
 }
 
 func listCommand() cli.Command {
