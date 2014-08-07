@@ -443,14 +443,13 @@ will store its output.`),
 				logrus.WithField("error", err).Error("failed to prepare backup task")
 				return
 			}
-			defer func() {
-				if err := task.Cleanup(); err != nil {
-					logrus.WithField("error", err).Error("failed to close backup task")
-				}
-			}()
 
 			if err := task.Execute(); err != nil {
 				logrus.WithField("error", err).Error("failed to backup")
+			}
+			deleteArtifacts := err == nil
+			if err := task.Cleanup(deleteArtifacts); err != nil {
+				logrus.WithField("error", err).Error("failed to close backup task")
 			}
 
 		},

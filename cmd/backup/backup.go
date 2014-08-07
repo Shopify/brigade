@@ -65,24 +65,33 @@ type Backup struct {
 }
 
 // Cleanup all the files used by the backup. Returns the first error, logs them all.
-func (b *Backup) Cleanup() error {
+func (b *Backup) Cleanup(deleteFiles bool) error {
 	var cerr error
 	for _, file := range []*os.File{b.listFile, b.diffFile, b.okFile, b.failFile} {
 		if file == nil {
 			continue
 		}
 		localLog := logrus.WithField("filename", file.Name())
+		if fi, err := file.Stat(); err == nil {
+			localLog = localLog.WithField("size", fi.Size())
+		}
 		if err := file.Close(); err != nil {
 			localLog.WithField("error", err).Error("closing file")
 			if cerr == nil {
 				cerr = err
 			}
 		}
-		if err := os.Remove(file.Name()); err != nil {
-			localLog.WithField("error", err).Error("removing file")
-			if cerr == nil {
-				cerr = err
+		if deleteFiles {
+			err := os.Remove(file.Name())
+			if err != nil {
+				localLog.WithField("error", err).Error("removing file")
+				if cerr == nil {
+					cerr = err
+				}
 			}
+			localLog.Info("file removed")
+		} else {
+			localLog.Info("file left intact")
 		}
 	}
 	return cerr
