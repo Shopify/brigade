@@ -7,6 +7,7 @@ import (
 	cmdsync "github.com/Shopify/brigade/cmd/sync"
 	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
+	"github.com/dustin/go-humanize"
 	"io"
 	"os"
 	"path"
@@ -16,6 +17,8 @@ import (
 )
 
 const (
+	gigabyte int64 = 1 << 30
+
 	timeFormat = time.RFC3339
 	sourceSfx  = "_source_list.json.gz"
 	diffSfx    = "_diff_list.json.gz"
@@ -263,12 +266,18 @@ func (b *Backup) persist() error {
 			return err
 		}
 		dstName := path.Join(b.statePath, f.Name())
-		logrus.WithFields(logrus.Fields{
+		localLog := logrus.WithFields(logrus.Fields{
 			"file":        f.Name(),
 			"destination": dstName,
-		}).Info("sending file to S3")
+		})
+		localLog.Info("sending file to S3")
 
-		return b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
+		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
+		if s3.IsS3Error(err, s3.ErrEntityTooLarge) {
+			localLog.Info("file too large, doing multipart upload")
+			return multipartPut(b.state, dstName, f, fi)
+		}
+		return err
 	}
 
 	files := []*os.File{b.listFile, b.okFile, b.failFile}
@@ -295,4 +304,32 @@ func (b *Backup) persist() error {
 	close(errc)
 	logrus.Info("done persisting artifact")
 	return <-errc
+}
+
+func multipartPut(bkt *s3.Bucket, keyname string, file *os.File, fi os.FileInfo) error {
+	partSize := 1 * gigabyte
+	localLog := logrus.WithFields(logrus.Fields{
+		"filename": file.Name(),
+		"size":     fi.Size(),
+		"partSize": partSize,
+	})
+	localLog.Info("initializing multipart upload")
+
+	multi, err := bkt.InitMulti(keyname, "", s3.BucketOwnerFull)
+	if err != nil {
+		return fmt.Errorf("initializing multipart upload: %v", err)
+	}
+
+	localLog.Info("starting multipart upload")
+	parts, err := multi.PutAll(file, partSize)
+	if err != nil {
+		return fmt.Errorf("putting all %s parts: %v", humanize.Bytes(uint64(partSize)), err)
+	}
+
+	localLog.WithField("parts", len(parts)).Info("completing multipart upload")
+	if err := multi.Complete(parts); err != nil {
+		return fmt.Errorf("completing multipart upload: %v", err)
+	}
+	localLog.WithField("parts", len(parts)).Info("multipart upload successful")
+	return nil
 }
