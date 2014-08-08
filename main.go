@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	// pprof attachment point
@@ -25,6 +26,22 @@ func main() {
 
 	// use all cores
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	file, err := os.OpenFile("brigade.lock", os.O_CREATE|os.O_TRUNC, 0640)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	defer func() {
+		_ = file.Close()
+		if err := os.Remove(file.Name()); err != nil {
+			logrus.WithField("err", err).Error(err)
+		}
+	}()
+	err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		logrus.WithField("err", err).Fatal("couldn't acquire lock on " + file.Name())
+	}
+	defer func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) }()
 
 	// long running jobs are painful to kill by mistake
 	go func() {
