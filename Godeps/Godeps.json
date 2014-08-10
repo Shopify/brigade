@@ -21,11 +21,11 @@
 		},
 		{
 			"ImportPath": "github.com/aybabtme/goamz/aws",
-			"Rev": "c7a5149efcea23ac02b576ec226704750a1d1609"
+			"Rev": "a586f600c231ecb8f1d3a336cd2910aa4c197a51"
 		},
 		{
 			"ImportPath": "github.com/aybabtme/goamz/s3",
-			"Rev": "c7a5149efcea23ac02b576ec226704750a1d1609"
+			"Rev": "a586f600c231ecb8f1d3a336cd2910aa4c197a51"
 		},
 		{
 			"ImportPath": "github.com/codegangsta/cli",

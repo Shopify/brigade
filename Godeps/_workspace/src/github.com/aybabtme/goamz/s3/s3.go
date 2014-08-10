@@ -888,6 +888,8 @@ func (s3 *S3) run(req *request, resp interface{}) (*http.Response, error) {
 				}
 				return
 			},
+			TLSHandshakeTimeout:   s3.ConnectTimeout,
+			ResponseHeaderTimeout: s3.ReadTimeout,
 		},
 	}
 
