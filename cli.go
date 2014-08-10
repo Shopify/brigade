@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 var version = "0.0.1"
@@ -37,6 +38,12 @@ func newApp() *cli.App {
 	}
 
 	return app
+}
+
+func setupS3Timeouts(s *s3.S3) *s3.S3 {
+	s.ConnectTimeout = time.Second * 30
+	s.ReadTimeout = time.Second * 30
+	return s
 }
 
 func mustURL(c *cli.Context, f cli.StringFlag) *url.URL {
@@ -112,7 +119,7 @@ traversing is saved and gzip'd as a list of s3 keys in JSON form.`),
 			bkt := mustURL(c, bucketFlag)
 			dest := mustString(c, destFlag)
 
-			srcS3 := s3.New(cfg.Source.AWS())
+			srcS3 := setupS3Timeouts(s3.New(cfg.Source.AWS()))
 
 			file, dsterr := os.Create(dest)
 			if dsterr != nil {
@@ -175,10 +182,10 @@ bucket to a destination bucket.`),
 			dest := mustURL(c, dstFlag)
 			conc := c.Int(concurrencyFlag.Name)
 
-			srcS3 := s3.New(cfg.Source.AWS())
+			srcS3 := setupS3Timeouts(s3.New(cfg.Source.AWS()))
 			srcBkt := srcS3.Bucket(src.Host)
 
-			destS3 := s3.New(cfg.Destination.AWS())
+			destS3 := setupS3Timeouts(s3.New(cfg.Destination.AWS()))
 			destBkt := destS3.Bucket(dest.Host)
 
 			listfile, err := os.Open(inputFilename)
@@ -417,13 +424,13 @@ will store its output.`),
 			dest := mustURL(c, destFlag)
 			state := mustURL(c, stateFlag)
 
-			srcS3 := s3.New(cfg.Source.AWS())
+			srcS3 := setupS3Timeouts(s3.New(cfg.Source.AWS()))
 			srcBkt := srcS3.Bucket(src.Host)
 
-			destS3 := s3.New(cfg.Destination.AWS())
+			destS3 := setupS3Timeouts(s3.New(cfg.Destination.AWS()))
 			destBkt := destS3.Bucket(dest.Host)
 
-			stateS3 := s3.New(cfg.State.AWS())
+			stateS3 := setupS3Timeouts(s3.New(cfg.State.AWS()))
 			stateBkt := stateS3.Bucket(state.Host)
 
 			logrus.Info("starting command ", c.Command.Name)
