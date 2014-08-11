@@ -17,7 +17,7 @@
 		},
 		{
 			"ImportPath": "github.com/aybabtme/formatter",
-			"Rev": "8b33c372cef478106f5bc1042e0d5bac85a3fc12"
+			"Rev": "b52e1c5b43bc56cece0215ee6e18b454fcad7790"
 		},
 		{
 			"ImportPath": "github.com/aybabtme/goamz/aws",
