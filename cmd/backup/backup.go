@@ -22,8 +22,8 @@ const (
 	timeFormat = time.RFC3339
 	sourceSfx  = "_source_list.json.gz"
 	diffSfx    = "_diff_list.json.gz"
-	okSfx      = "_ok_list_json.gz"
-	failSfx    = "_fail_list_json.gz"
+	okSfx      = "_ok_list.json.gz"
+	failSfx    = "_fail_list.json.gz"
 )
 
 func toSourceName(t time.Time) string { return toSfxName(t, sourceSfx) }
