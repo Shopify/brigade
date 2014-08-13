@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	gigabyte int64 = 1 << 30
+	megabyte int64 = 1 << 20
 
 	timeFormat = time.RFC3339
 	sourceSfx  = "_source_list.json.gz"
@@ -307,7 +307,7 @@ func (b *Backup) persist() error {
 }
 
 func multipartPut(bkt *s3.Bucket, keyname string, file *os.File, fi os.FileInfo) error {
-	partSize := 1 * gigabyte
+	partSize := 100 * megabyte
 	localLog := logrus.WithFields(logrus.Fields{
 		"filename": file.Name(),
 		"size":     fi.Size(),
