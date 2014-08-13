@@ -451,11 +451,14 @@ will store its output.`),
 				return
 			}
 
+			var deleteFiles bool
 			if err := task.Execute(); err != nil {
 				logrus.WithField("error", err).Error("failed to backup")
+				deleteFiles = false
+			} else {
+				deleteFiles = true
 			}
-			deleteArtifacts := err == nil
-			if err := task.Cleanup(deleteArtifacts); err != nil {
+			if err := task.Cleanup(deleteFiles); err != nil {
 				logrus.WithField("error", err).Error("failed to close backup task")
 			}
 
