@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"compress/gzip"
 	"fmt"
 	"github.com/Shopify/brigade/cmd/diff"
 	"github.com/Shopify/brigade/cmd/list"
@@ -160,9 +161,14 @@ func (b *Backup) Execute() error {
 
 	// list
 	logrus.Info("[1/4] listing source bucket")
-	err := list.List(b.src.S3, b.src.Name, b.srcPath, b.listFile)
+	listWr := gzip.NewWriter(b.listFile)
+
+	err := list.List(b.src.S3, b.src.Name, b.srcPath, listWr)
 	if err != nil {
 		return fmt.Errorf("listing bucket %q: %v", b.src.Name, err)
+	}
+	if err := listWr.Close(); err != nil {
+		return fmt.Errorf("closing gzip writer on bucket listing: %v", err)
 	}
 
 	if err := readyForRead(b.listFile); err != nil {
@@ -179,9 +185,9 @@ func (b *Backup) Execute() error {
 	var src *os.File
 	if found {
 		logrus.Info("[2/4] - computing difference between old list and this one")
-		err := diff.Diff(lastList, b.listFile, b.diffFile)
+		err := computeSourceList(lastList, b.listFile, b.diffFile)
 		if err != nil {
-			logrus.WithField("error", err).Warn("error during diff, prodeeding with full listing sync")
+			logrus.WithField("error", err).Warn("error during diff, proceeding with full listing sync")
 			src = b.listFile
 		} else {
 			src = b.diffFile
@@ -197,14 +203,8 @@ func (b *Backup) Execute() error {
 
 	// sync
 	logrus.Info("[3/4] syncing source to destination bucket")
-	syncTask, err := cmdsync.NewSyncTask(b.src, b.dst)
-	if err != nil {
-		return fmt.Errorf("preparing sync task: %v", err)
-	}
-
-	err = syncTask.Start(src, b.okFile, b.failFile)
-	if err != nil {
-		return fmt.Errorf("doing the sync: %v", err)
+	if err := performSync(b.src, b.dst, src, b.okFile, b.failFile); err != nil {
+		return fmt.Errorf("performing sync: %v", err)
 	}
 
 	// Persist artifacts
@@ -215,6 +215,54 @@ func (b *Backup) Execute() error {
 	}
 	logrus.Info("backup completed without error")
 	return nil
+}
+
+func computeSourceList(lastList, newList io.Reader, diffList io.Writer) error {
+	lastListGzr, err := gzip.NewReader(lastList)
+	if err != nil {
+		return fmt.Errorf("no gzip stream from last list: %v", err)
+	}
+	defer func() { _ = lastListGzr.Close() }()
+
+	listGzr, err := gzip.NewReader(newList)
+	if err != nil {
+		return fmt.Errorf("no gzip stream from bucket list: %v", err)
+	}
+	defer func() { _ = listGzr.Close() }()
+
+	diffGzw := gzip.NewWriter(diffList)
+	defer func() {
+		if err = diffGzw.Close(); err != nil {
+			logrus.WithField("error", err).Warn("error closing gzip writer of diff, proceeding with full listing sync")
+		}
+	}()
+
+	return diff.Diff(lastListGzr, listGzr, diffGzw)
+}
+
+func performSync(src, dst *s3.Bucket, list io.Reader, ok, fail io.Writer) error {
+	syncTask, err := cmdsync.NewSyncTask(src, dst)
+	if err != nil {
+		return fmt.Errorf("preparing sync task: %v", err)
+	}
+
+	srcGr, err := gzip.NewReader(list)
+	if err != nil {
+		return fmt.Errorf("getting reader from source listing: %v", err)
+	}
+	defer func() { _ = srcGr.Close() }()
+
+	okGzw := gzip.NewWriter(ok)
+	failGzw := gzip.NewWriter(fail)
+	defer func() {
+		if err := okGzw.Close(); err != nil {
+			logrus.WithField("error", err).Error("closing gzip writer on ok file")
+		}
+		if err := failGzw.Close(); err != nil {
+			logrus.WithField("error", err).Error("closing gzip writer on fail file")
+		}
+	}()
+	return syncTask.Start(srcGr, okGzw, failGzw)
 }
 
 func findLastList(bkt *s3.Bucket, pfx string) (io.ReadCloser, bool, error) {
