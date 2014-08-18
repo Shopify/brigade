@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bufio"
 	"compress/gzip"
 	"fmt"
 	"github.com/Shopify/brigade/cmd/diff"
@@ -10,6 +11,8 @@ import (
 	"github.com/aybabtme/goamz/s3"
 	"github.com/dustin/go-humanize"
 	"io"
+	"io/ioutil"
+	"net"
 	"os"
 	"path"
 	"strings"
@@ -19,6 +22,7 @@ import (
 
 const (
 	megabyte int64 = 1 << 20
+	maxRetry       = 5
 
 	timeFormat = time.RFC3339
 	sourceSfx  = "_source_list.json.gz"
@@ -178,10 +182,23 @@ func (b *Backup) Execute() error {
 	// preprocess
 	logrus.Info("[2/4] preprocessing bucket list")
 	logrus.Info("[2/4] - fetching most recent list")
-	lastList, found, err := findLastList(b.state, b.statePath)
+	lastList, err := ioutil.TempFile("", "last_source_listing")
 	if err != nil {
-		return fmt.Errorf("finding list listing: %v", err)
+		return fmt.Errorf("creating temp file for last listing: %v", err)
 	}
+	defer func() {
+		_ = lastList.Close()
+		_ = os.Remove(lastList.Name())
+	}()
+
+	found, err := findLastList(b.state, b.statePath, lastList)
+	if err != nil {
+		return fmt.Errorf("finding last listing: %v", err)
+	}
+	if err := lastList.Sync(); err != nil {
+		return fmt.Errorf("syncing last listing to disk: %v", err)
+	}
+
 	var src *os.File
 	if found {
 		logrus.Info("[2/4] - computing difference between old list and this one")
@@ -265,10 +282,10 @@ func performSync(src, dst *s3.Bucket, list io.Reader, ok, fail io.Writer) error 
 	return syncTask.Start(srcGr, okGzw, failGzw)
 }
 
-func findLastList(bkt *s3.Bucket, pfx string) (io.ReadCloser, bool, error) {
+func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error) {
 	res, err := bkt.List(pfx, "/", "", 10000)
 	if err != nil {
-		return nil, false, fmt.Errorf("listing %q: %v", pfx, err)
+		return false, fmt.Errorf("listing %q: %v", pfx, err)
 	}
 
 	var (
@@ -297,10 +314,27 @@ func findLastList(bkt *s3.Bucket, pfx string) (io.ReadCloser, bool, error) {
 
 	if mostRecentTime.IsZero() {
 		// we havent found a most recent source backup
-		return nil, false, nil
+		return false, nil
 	}
-	rd, err := bkt.GetReader(mostRecentKey.Key)
-	return rd, err == nil, err
+
+	// retry maxRetry times
+	for i := 0; i < maxRetry; i++ {
+		rd, err := bkt.GetReader(mostRecentKey.Key)
+		if err != nil {
+			continue
+		}
+		bufr := bufio.NewReader(rd)
+		_, err = dest.Seek(0, 0)
+		if err != nil {
+			return false, fmt.Errorf("seeking to begining of destination: %v", err)
+		}
+		_, err = io.Copy(dest, bufr)
+		if err == nil {
+			_, err = dest.Seek(0, 0)
+			return true, err
+		}
+	}
+	return false, err
 }
 
 func (b *Backup) persist() error {
