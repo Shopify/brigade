@@ -84,7 +84,7 @@ func TestFindLastList(t *testing.T) {
 
 	t.Logf("should have nothing in the bucket to begin with")
 	bkt := s3m.S3().Bucket(perf.Name())
-	if _, found, err := findLastList(bkt, ""); err != nil || found {
+	if found, err := findLastList(bkt, "", nil); err != nil || found {
 		t.Fatalf("should not have found anything: found=%v err=%v", found, err)
 	}
 
@@ -140,7 +140,8 @@ func TestFindLastList(t *testing.T) {
 }
 
 func helpFindLast(t *testing.T, bkt *s3.Bucket) []byte {
-	rd, found, err := findLastList(bkt, "")
+	rd := newByteSeeker()
+	found, err := findLastList(bkt, "", rd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,4 +155,24 @@ func helpFindLast(t *testing.T, bkt *s3.Bucket) []byte {
 		t.Fatal(err)
 	}
 	return got
+}
+
+type byteSeeker struct {
+	buf *bytes.Buffer
+}
+
+func newByteSeeker() *byteSeeker {
+	return &byteSeeker{
+		buf: bytes.NewBuffer(nil),
+	}
+}
+
+func (b *byteSeeker) Write(p []byte) (int, error) { return b.buf.Write(p) }
+func (b *byteSeeker) Read(p []byte) (int, error)  { return b.buf.Read(p) }
+func (b *byteSeeker) Close() error                { return nil }
+
+// only ever resets the buffer to offset 0
+func (b *byteSeeker) Seek(offset int64, whence int) (int64, error) {
+	b.buf = bytes.NewBuffer(b.buf.Bytes())
+	return 0, nil
 }
