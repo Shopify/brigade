@@ -290,6 +290,12 @@ func (s *SyncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
 			return retry, nil
 		case *s3.Error:
 			// if the error is specific to S3, we can do smart stuff like
+			if s3.IsS3Error(e, s3.ErrNoSuchKey) {
+				// when the key disappeared (occurs very often), don't retry
+				// and quit right away. return no errors so the key is considered
+				// sync'd (nothing to sync)
+				return retry, nil
+			}
 			if shouldAbort(e) {
 				// abort if its an error that will occur for all future calls
 				// such as bad auth, or the bucket not existing anymore (that'd be bad!)
@@ -322,14 +328,8 @@ func (s *SyncTask) syncOrRetry(src, dst *s3.Bucket, key s3.Key) (int, error) {
 			"sleep":     sleepFor,
 			"retry":     retry,
 			"max_retry": s.MaxRetry,
-		}).Warn("sleeping on retryable error")
+		}).Debug("sleeping on retryable error")
 		time.Sleep(sleepFor)
-		logrus.WithFields(logrus.Fields{
-			"sleep":     sleepFor,
-			"retry":     retry,
-			"max_retry": s.MaxRetry,
-		}).Info("sleeping on retryable error")
-
 	}
 	return retry, err
 }
