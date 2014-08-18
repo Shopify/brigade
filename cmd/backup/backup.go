@@ -353,29 +353,6 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 }
 
 func (b *Backup) persist() error {
-	doPersist := func(f *os.File) error {
-		err := readyForRead(f)
-		if err != nil {
-			return fmt.Errorf("readying for read: %v", err)
-		}
-		fi, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		dstName := path.Join(b.statePath, f.Name())
-		localLog := logrus.WithFields(logrus.Fields{
-			"file":        f.Name(),
-			"destination": dstName,
-		})
-		localLog.Info("sending file to S3")
-
-		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
-		if s3.IsS3Error(err, s3.ErrEntityTooLarge) {
-			localLog.Info("file too large, doing multipart upload")
-			return multipartPut(b.state, dstName, f, fi)
-		}
-		return err
-	}
 
 	files := []*os.File{b.listFile, b.okFile, b.failFile}
 	errc := make(chan error, len(files))
@@ -384,7 +361,7 @@ func (b *Backup) persist() error {
 		wg.Add(1)
 		go func(w *sync.WaitGroup, f *os.File) {
 			defer w.Done()
-			if err := doPersist(f); err != nil {
+			if err := b.doPersist(f); err != nil {
 				logrus.WithFields(logrus.Fields{
 					"error": err,
 					"file":  f.Name(),
@@ -403,7 +380,58 @@ func (b *Backup) persist() error {
 	return <-errc
 }
 
+func (b *Backup) doPersist(f *os.File) error {
+	err := readyForRead(f)
+	if err != nil {
+		return fmt.Errorf("readying for read: %v", err)
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	dstName := path.Join(b.statePath, f.Name())
+	localLog := logrus.WithFields(logrus.Fields{
+		"file":        f.Name(),
+		"destination": dstName,
+	})
+	localLog.Info("sending file to S3")
+
+	for i := 0; i < maxRetry; i++ {
+		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
+		if s3.IsS3Error(err, s3.ErrEntityTooLarge) {
+			localLog.Info("file too large, doing multipart upload")
+			return multipartPut(b.state, dstName, f, fi)
+		}
+		if err == nil {
+			break
+		}
+	}
+	return err
+}
+
 func multipartPut(bkt *s3.Bucket, keyname string, file *os.File, fi os.FileInfo) error {
+	var err error
+	for i := 0; i < maxRetry; i++ {
+		err = doMultipartPut(bkt, keyname, file, fi)
+		if err == nil {
+			return err
+		}
+		logrus.WithFields(logrus.Fields{
+			"filename": file.Name(),
+			"size":     fi.Size(),
+			"attempt":  i,
+			"error":    err,
+		}).Error("failed an attempt to do multipart put")
+	}
+	logrus.WithFields(logrus.Fields{
+		"filename": file.Name(),
+		"size":     fi.Size(),
+		"error":    err,
+	}).Error("failed too many times to do multipart put")
+	return err
+}
+
+func doMultipartPut(bkt *s3.Bucket, keyname string, file *os.File, fi os.FileInfo) error {
 	partSize := 100 * megabyte
 	localLog := logrus.WithFields(logrus.Fields{
 		"filename": file.Name(),
@@ -420,11 +448,13 @@ func multipartPut(bkt *s3.Bucket, keyname string, file *os.File, fi os.FileInfo)
 	localLog.Info("starting multipart upload")
 	parts, err := multi.PutAll(file, partSize)
 	if err != nil {
+		_ = multi.Abort()
 		return fmt.Errorf("putting all %s parts: %v", humanize.Bytes(uint64(partSize)), err)
 	}
 
 	localLog.WithField("parts", len(parts)).Info("completing multipart upload")
 	if err := multi.Complete(parts); err != nil {
+		_ = multi.Abort()
 		return fmt.Errorf("completing multipart upload: %v", err)
 	}
 	localLog.WithField("parts", len(parts)).Info("multipart upload successful")
