@@ -4,3 +4,4 @@ testdata/*
 *.json.gz
 *.elog
 brigade
+brigade.lock
