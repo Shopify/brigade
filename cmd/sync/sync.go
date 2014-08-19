@@ -53,7 +53,7 @@ func NewSyncTask(src, dst *s3.Bucket) (*SyncTask, error) {
 		RetryBase:  time.Second,
 		MaxRetry:   10,
 		DecodePara: runtime.NumCPU(),
-		SyncPara:   200,
+		SyncPara:   1000,
 		Sync:       defaultSyncer,
 
 		src: src,

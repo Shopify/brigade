@@ -155,7 +155,7 @@ func syncCommand() cli.Command {
 		failureFlag     = cli.StringFlag{Name: "failure", Usage: "name of the output file where to write the list of keys that failed to sync, defaults to /dev/null"}
 		srcFlag         = cli.StringFlag{Name: "src", Usage: "source bucket to get the keys from"}
 		dstFlag         = cli.StringFlag{Name: "dest", Usage: "destination bucket to put the keys into"}
-		concurrencyFlag = cli.IntFlag{Name: "concurrency", Value: 200, Usage: "number of concurrent sync request"}
+		concurrencyFlag = cli.IntFlag{Name: "concurrency", Value: 1000, Usage: "number of concurrent sync request"}
 	)
 
 	return cli.Command{
