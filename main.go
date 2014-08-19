@@ -26,6 +26,7 @@ func main() {
 
 	// use all cores
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	logrus.SetOutput(os.Stderr)
 
 	file, err := os.OpenFile("brigade.lock", os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
