@@ -37,9 +37,10 @@ const debug = false
 type S3 struct {
 	aws.Auth
 	aws.Region
-	ConnectTimeout time.Duration
-	ReadTimeout    time.Duration
-	private        byte // Reserve the right of using private data.
+	ConnectTimeout      time.Duration
+	ReadTimeout         time.Duration
+	MaxIdleConnsPerHost int
+	private             byte // Reserve the right of using private data.
 }
 
 // The Bucket type encapsulates operations with an S3 bucket.
@@ -89,7 +90,14 @@ var attempts = aws.AttemptStrategy{
 
 // New creates a new S3.
 func New(auth aws.Auth, region aws.Region) *S3 {
-	return &S3{auth, region, 0, 0, 0}
+	return &S3{
+		Auth:                auth,
+		Region:              region,
+		ConnectTimeout:      0,
+		ReadTimeout:         0,
+		MaxIdleConnsPerHost: http.DefaultMaxIdleConnsPerHost,
+		private:             0x0,
+	}
 }
 
 // Bucket returns a Bucket with the given name.
@@ -888,6 +896,7 @@ func (s3 *S3) run(req *request, resp interface{}) (*http.Response, error) {
 				}
 				return
 			},
+			MaxIdleConnsPerHost:   s3.MaxIdleConnsPerHost,
 			TLSHandshakeTimeout:   s3.ConnectTimeout,
 			ResponseHeaderTimeout: s3.ReadTimeout,
 		},

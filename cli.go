@@ -41,6 +41,7 @@ func newApp() *cli.App {
 }
 
 func setupS3Timeouts(s *s3.S3) *s3.S3 {
+	s.MaxIdleConnsPerHost = 10000
 	s.ConnectTimeout = time.Second * 30
 	s.ReadTimeout = time.Second * 30
 	return s

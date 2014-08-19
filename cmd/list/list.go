@@ -104,7 +104,6 @@ var metrics = struct {
 
 // List an s3 bucket and write the keys in JSON form to dst.
 func List(sss *s3.S3, bucket, prefix string, dst io.Writer) error {
-
 	keys := make(chan s3.Key, Concurrency)
 
 	// Start a key encoder, which writes to the file concurrently
@@ -221,7 +220,7 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.
 					"error":   doneJob.err,
 					"retries": doneJob.retryLeft,
 					"job_id":  doneJob.id,
-				}).Warn("retrying failed job")
+				}).Debug("retrying failed job")
 
 				doneJob.err = nil
 				followers.Add(doneJob)
@@ -243,7 +242,7 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.
 			logrus.WithFields(logrus.Fields{
 				"job":     doneJob.id,
 				"retries": doneJob.retryLeft,
-			}).Info("job rescued from error")
+			}).Debug("job rescued from error")
 		} else {
 			metrics.jobsOk.Add(1)
 		}
@@ -272,7 +271,7 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.
 func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), visited map[string]struct{}) {
 	for _, key := range keys {
 		if _, ok := visited[key.Key]; ok {
-			logrus.WithField("key", key).Printf("deduplicate key")
+			logrus.WithField("key", key).Warn("deduplicate key")
 			continue
 		}
 		visited[key.Key] = struct{}{}
@@ -329,9 +328,9 @@ func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *J
 			backoff := math.Pow(2.0, attemptsSoFar)
 			sleepFor := time.Duration(backoff) * InitRetry
 
-			logrus.WithField("backoff", backoff).Warn("worker is sleeping on error")
+			logrus.WithField("backoff", backoff).Debug("worker is sleeping on error")
 			time.Sleep(sleepFor)
-			logrus.WithField("backoff", backoff).Warn("worker woke up")
+			logrus.WithField("backoff", backoff).Debug("worker woke up")
 		} else {
 			// if all went well, set the job results
 			job.keys = res.Contents
