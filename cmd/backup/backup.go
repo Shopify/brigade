@@ -12,7 +12,6 @@ import (
 	"github.com/dustin/go-humanize"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
 	"path"
 	"strings"

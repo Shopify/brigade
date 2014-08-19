@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"errors"
 	"github.com/Shopify/brigade/s3mock"
 	"github.com/Sirupsen/logrus"
 	"github.com/aybabtme/goamz/s3"
@@ -173,6 +174,9 @@ func (b *byteSeeker) Close() error                { return nil }
 
 // only ever resets the buffer to offset 0
 func (b *byteSeeker) Seek(offset int64, whence int) (int64, error) {
+	if offset != 0 || whence != 0 {
+		return -1, errors.New("can only invoke byteSeeker.Seek with 0 offset, 0 whence")
+	}
 	b.buf = bytes.NewBuffer(b.buf.Bytes())
 	return 0, nil
 }
