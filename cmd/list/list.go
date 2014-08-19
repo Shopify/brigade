@@ -50,7 +50,7 @@ var (
 	// Concurrency is the number of concurrent LIST request done on S3. At 200, the
 	// worker queue is typically always busy and the network is saturated, so
 	// there is no point increasing this.
-	Concurrency = 200
+	Concurrency = 1000
 
 	// MaxRetry is the number of time a worker will retry a LIST on a path,
 	// given that the error was retryable.
