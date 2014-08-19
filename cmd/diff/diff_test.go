@@ -12,6 +12,10 @@ import (
 	"testing"
 )
 
+func init() {
+	logrus.SetLevel(logrus.DebugLevel)
+}
+
 func TestCanDiffTwoKeySets(t *testing.T) {
 	testDiff(t,
 		[]s3.Key{{ETag: "1"}, {ETag: "3"}},              // old

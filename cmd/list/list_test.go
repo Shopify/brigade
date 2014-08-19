@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+func init() {
+	logrus.SetLevel(logrus.DebugLevel)
+}
+
 func TestCanListBucket(t *testing.T) {
 	withPerfBucket(t, func(t *testing.T, s3 *s3mock.MockS3, bkt s3mock.MockBucket, w io.Writer) error {
 		return list.List(s3.S3(), bkt.Name(), "/", w)
