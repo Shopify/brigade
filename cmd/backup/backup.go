@@ -293,8 +293,12 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 	)
 
 	for _, key := range res.Contents {
-		logrus.WithField("key", key.Key).Info("looking at key")
 		basename := path.Base(key.Key)
+		logrus.WithFields(logrus.Fields{
+			"basename": basename,
+			"key":      key,
+		}).Warn("looking at key")
+
 		t, found, err := fromSourceName(basename)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
