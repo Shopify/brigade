@@ -286,13 +286,14 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 	if err != nil {
 		return false, fmt.Errorf("listing %q: %v", pfx, err)
 	}
-
+	logrus.WithField("name", res.Name).Info("fetching previous listings")
 	var (
 		mostRecentTime time.Time
 		mostRecentKey  s3.Key
 	)
 
 	for _, key := range res.Contents {
+		logrus.WithField("key", key.Key).Info("looking at key")
 		basename := path.Base(key.Key)
 		t, found, err := fromSourceName(basename)
 		if err != nil {
@@ -315,7 +316,7 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 		// we havent found a most recent source backup
 		return false, nil
 	}
-
+	logrus.WithField("key", mostRecentKey.Key).Info("found most recent artifact")
 	// retry maxRetry times
 	for i := 0; i < maxRetry; i++ {
 		rd, err := bkt.GetReader(mostRecentKey.Key)
