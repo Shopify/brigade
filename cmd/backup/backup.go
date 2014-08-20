@@ -296,14 +296,14 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 		basename := path.Base(key.Key)
 		logrus.WithFields(logrus.Fields{
 			"basename": basename,
-			"key":      key,
+			"key":      key.Key,
 		}).Warn("looking at key")
 
 		t, found, err := fromSourceName(basename)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"error": err,
-				"key":   key,
+				"key":   key.Key,
 			}).Warn("malformed source list name")
 		}
 		if !found {
@@ -322,9 +322,15 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 	}
 	logrus.WithField("key", mostRecentKey.Key).Info("found most recent artifact")
 	// retry maxRetry times
+	var rd io.Reader
 	for i := 0; i < maxRetry; i++ {
-		rd, err := bkt.GetReader(mostRecentKey.Key)
+		rd, err = bkt.GetReader(mostRecentKey.Key)
 		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"error": err,
+				"key":   mostRecentKey.Key,
+			}).Error("fetching most recent key, sleeping")
+			time.Sleep(time.Second)
 			continue
 		}
 		bufr := bufio.NewReader(rd)
@@ -338,6 +344,11 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 			return true, err
 		}
 	}
+	logrus.WithFields(logrus.Fields{
+		"error":    err,
+		"key":      mostRecentKey.Key,
+		"maxRetry": maxRetry,
+	}).Error("failed too many times")
 	return false, err
 }
 
