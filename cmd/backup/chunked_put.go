@@ -10,9 +10,13 @@ import (
 func multipartPut(bkt *s3.Bucket, keyname string, src s3.ReaderAtSeeker, size int64) error {
 	var err error
 	for i := 0; i < maxRetry; i++ {
+		_, err = src.Seek(0, 0)
+		if err != nil {
+			return err
+		}
 		err = doMultipartPut(bkt, keyname, src, size)
 		if err == nil {
-			return err
+			return nil
 		}
 		log.WithFields(log.Fields{
 			"size":    size,

@@ -326,7 +326,7 @@ func findLastList(bkt *s3.Bucket, pfx string, dest io.WriteSeeker) (bool, error)
 	}
 	_, err = dest.Seek(0, 0)
 
-	return true, nil
+	return true, err
 }
 
 func (b *Backup) persist() error {
@@ -374,6 +374,10 @@ func (b *Backup) doPersist(f *os.File) error {
 	localLog.Info("sending file to S3")
 
 	for i := 0; i < maxRetry; i++ {
+		_, err := f.Seek(0, 0)
+		if err != nil {
+			return err
+		}
 		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
 		if s3.IsS3Error(err, s3.ErrEntityTooLarge) {
 			localLog.Info("file too large, doing multipart upload")
