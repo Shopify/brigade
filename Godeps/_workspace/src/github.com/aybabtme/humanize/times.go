@@ -7,13 +7,12 @@ import (
 
 // Seconds-based time units
 const (
-	Minute   = 60
-	Hour     = 60 * Minute
-	Day      = 24 * Hour
-	Week     = 7 * Day
-	Month    = 30 * Day
-	Year     = 12 * Month
-	LongTime = 37 * Year
+	Minute = 60
+	Hour   = 60 * Minute
+	Day    = 24 * Hour
+	Week   = 7 * Day
+	Month  = 30 * Day
+	Year   = 12 * Month
 )
 
 // Time formats a time into a relative string.
@@ -23,14 +22,13 @@ func Time(then time.Time) string {
 
 	lbl := "ago"
 	diff := now.Unix() - then.Unix()
-
-	after := then.After(now)
-	if after {
+	if then.After(now) {
 		lbl = "from now"
 		diff = then.Unix() - now.Unix()
 	}
 
 	switch {
+
 	case diff <= 0:
 		return "now"
 	case diff <= 2:
@@ -65,15 +63,6 @@ func Time(then time.Time) string {
 
 	case diff < 18*Month:
 		return fmt.Sprintf("1 year %s", lbl)
-	case diff < 2*Year:
-		return fmt.Sprintf("2 years %s", lbl)
-	case diff < LongTime:
-		return fmt.Sprintf("%d years %s", diff/Year, lbl)
 	}
-
-	if after {
-		return "a while from now"
-	} else {
-		return "long ago"
-	}
+	return then.String()
 }
