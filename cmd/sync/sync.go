@@ -30,9 +30,22 @@ var (
 // SyncerFunc syncs an s3.Key from a source to a destination bucket.
 type SyncerFunc func(src *s3.Bucket, dst *s3.Bucket, key s3.Key) error
 
-func defaultSyncer(src, dst *s3.Bucket, key s3.Key) error {
+// PutCopySyncer does a PutCopy call to S3, copying a key from src to dst
+// if both are in the same region.
+func PutCopySyncer(src, dst *s3.Bucket, key s3.Key) error {
 	_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
 	return err
+}
+
+// GetPutSyncer does a GET, then a PUT on the key, streaming the GET reader
+// to the PUT writer with a buffer.
+func GetPutSyncer(src, dst *s3.Bucket, key s3.Key) error {
+	rd, err := src.GetReader(key.Key)
+	if err != nil {
+		return err
+	}
+	bufrd := bufio.NewReader(rd)
+	return src.PutReader(key.Key, bufrd, key.Size, "", s3.Private, s3.Options{})
 }
 
 // NewSyncTask creates a sync task that will sync keys from src onto dst.
@@ -54,7 +67,7 @@ func NewSyncTask(src, dst *s3.Bucket) (*SyncTask, error) {
 		MaxRetry:   10,
 		DecodePara: runtime.NumCPU(),
 		SyncPara:   1000,
-		Sync:       defaultSyncer,
+		Sync:       PutCopySyncer,
 
 		src: src,
 		dst: dst,
