@@ -8,9 +8,24 @@ import (
 	"time"
 )
 
+// An entry is the final or intermediate Logrus logging entry. It containts all
+// the fields passed with WithField{,s}. It's finally logged when Debug, Info,
+// Warn, Error, Fatal or Panic is called on it. These objects can be reused and
+// passed around as much as you wish to avoid field duplication.
 type Entry struct {
 	Logger *Logger
-	Data   Fields
+
+	// Contains all the fields set by the user.
+	Data Fields
+
+	// Time at which the log entry was created
+	Time time.Time
+
+	// Level the log entry was logged at: Debug, Info, Warn, Error, Fatal or Panic
+	Level Level
+
+	// Message passed to Debug, Info, Warn, Error, Fatal or Panic
+	Message string
 }
 
 var baseTimestamp time.Time
@@ -23,11 +38,14 @@ func NewEntry(logger *Logger) *Entry {
 	}
 }
 
+// Returns a reader for the entry, which is a proxy to the formatter.
 func (entry *Entry) Reader() (*bytes.Buffer, error) {
 	serialized, err := entry.Logger.Formatter.Format(entry)
 	return bytes.NewBuffer(serialized), err
 }
 
+// Returns the string representation from the reader and ultimately the
+// formatter.
 func (entry *Entry) String() (string, error) {
 	reader, err := entry.Reader()
 	if err != nil {
@@ -37,10 +55,12 @@ func (entry *Entry) String() (string, error) {
 	return reader.String(), err
 }
 
+// Add a single field to the Entry.
 func (entry *Entry) WithField(key string, value interface{}) *Entry {
 	return entry.WithFields(Fields{key: value})
 }
 
+// Add a map of fields to the Entry.
 func (entry *Entry) WithFields(fields Fields) *Entry {
 	data := Fields{}
 	for k, v := range entry.Data {
@@ -52,12 +72,12 @@ func (entry *Entry) WithFields(fields Fields) *Entry {
 	return &Entry{Logger: entry.Logger, Data: data}
 }
 
-func (entry *Entry) log(level string, levelInt Level, msg string) string {
-	entry.Data["time"] = time.Now().String()
-	entry.Data["level"] = level
-	entry.Data["msg"] = msg
+func (entry *Entry) log(level Level, msg string) string {
+	entry.Time = time.Now()
+	entry.Level = level
+	entry.Message = msg
 
-	if err := entry.Logger.Hooks.Fire(levelInt, entry); err != nil {
+	if err := entry.Logger.Hooks.Fire(level, entry); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to fire hook", err)
 	}
 
@@ -79,7 +99,7 @@ func (entry *Entry) log(level string, levelInt Level, msg string) string {
 
 func (entry *Entry) Debug(args ...interface{}) {
 	if entry.Logger.Level >= DebugLevel {
-		entry.log("debug", DebugLevel, fmt.Sprint(args...))
+		entry.log(DebugLevel, fmt.Sprint(args...))
 	}
 }
 
@@ -89,32 +109,32 @@ func (entry *Entry) Print(args ...interface{}) {
 
 func (entry *Entry) Info(args ...interface{}) {
 	if entry.Logger.Level >= InfoLevel {
-		entry.log("info", InfoLevel, fmt.Sprint(args...))
+		entry.log(InfoLevel, fmt.Sprint(args...))
 	}
 }
 
 func (entry *Entry) Warn(args ...interface{}) {
 	if entry.Logger.Level >= WarnLevel {
-		entry.log("warning", WarnLevel, fmt.Sprint(args...))
+		entry.log(WarnLevel, fmt.Sprint(args...))
 	}
 }
 
 func (entry *Entry) Error(args ...interface{}) {
 	if entry.Logger.Level >= ErrorLevel {
-		entry.log("error", ErrorLevel, fmt.Sprint(args...))
+		entry.log(ErrorLevel, fmt.Sprint(args...))
 	}
 }
 
 func (entry *Entry) Fatal(args ...interface{}) {
 	if entry.Logger.Level >= FatalLevel {
-		entry.log("fatal", FatalLevel, fmt.Sprint(args...))
+		entry.log(FatalLevel, fmt.Sprint(args...))
 	}
 	os.Exit(1)
 }
 
 func (entry *Entry) Panic(args ...interface{}) {
 	if entry.Logger.Level >= PanicLevel {
-		msg := entry.log("panic", PanicLevel, fmt.Sprint(args...))
+		msg := entry.log(PanicLevel, fmt.Sprint(args...))
 		panic(msg)
 	}
 	panic(fmt.Sprint(args...))

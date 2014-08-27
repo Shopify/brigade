@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/Shopify/brigade",
-	"GoVersion": "go1.3",
+	"GoVersion": "go1.3.1",
 	"Packages": [
 		"./..."
 	],
@@ -12,8 +12,8 @@
 		},
 		{
 			"ImportPath": "github.com/Sirupsen/logrus",
-			"Comment": "v0.2.0-14-gbeee753",
-			"Rev": "beee753015b78c153ea7ea90587b328a135339a2"
+			"Comment": "v0.5.1-2-gc13432b",
+			"Rev": "c13432b0a52fa22ed08301e522a0bdb2ce0e2d40"
 		},
 		{
 			"ImportPath": "github.com/aybabtme/formatter",
@@ -21,11 +21,11 @@
 		},
 		{
 			"ImportPath": "github.com/aybabtme/goamz/aws",
-			"Rev": "00c79fbad8c1c06781710e6979983a14364c0b00"
+			"Rev": "74cdbbe86fd8935294c2c12cb580c025885dccaa"
 		},
 		{
 			"ImportPath": "github.com/aybabtme/goamz/s3",
-			"Rev": "00c79fbad8c1c06781710e6979983a14364c0b00"
+			"Rev": "74cdbbe86fd8935294c2c12cb580c025885dccaa"
 		},
 		{
 			"ImportPath": "github.com/codegangsta/cli",

@@ -261,6 +261,9 @@ func (b *Bucket) Exists(path string) (exists bool, err error) {
 		if resp.StatusCode/100 == 2 {
 			exists = true
 		}
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
 		return exists, err
 	}
 	return false, fmt.Errorf("S3 Currently Unreachable")
@@ -786,8 +789,12 @@ func (req *request) url() (*url.URL, error) {
 // body will be unmarshalled on it.
 func (s3 *S3) query(req *request, resp interface{}) error {
 	err := s3.prepare(req)
-	if err == nil {
-		_, err = s3.run(req, resp)
+	if err != nil {
+		return err
+	}
+	r, err := s3.run(req, resp)
+	if r != nil && r.Body != nil {
+		r.Body.Close()
 	}
 	return err
 }
@@ -910,7 +917,7 @@ func (s3 *S3) run(req *request, resp interface{}) (*http.Response, error) {
 		dump, _ := httputil.DumpResponse(hresp, true)
 		log.Printf("} -> %s\n", dump)
 	}
-	if hresp.StatusCode != 200 && hresp.StatusCode != 204 {
+	if hresp.StatusCode != 200 && hresp.StatusCode != 204 && hresp.StatusCode != 206 {
 		return nil, buildError(hresp)
 	}
 	if resp != nil {
