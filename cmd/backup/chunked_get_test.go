@@ -132,7 +132,7 @@ func withAWSBucket(t *testing.T, action func(t *testing.T, bkt *s3.Bucket) error
 	}
 
 	logrus.Debug("test: starting...")
-	err := action(t, bkt)
+	err = action(t, bkt)
 	logrus.Debug("test: completed")
 	if err != nil {
 		t.Fatalf("general test error: %v", err)

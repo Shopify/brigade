@@ -55,7 +55,7 @@ func (m *MockS3) Seed(mockBkt MockBucket) *MockS3 {
 		return m
 	}
 
-	rand := randbo.NewFast()
+	rand := randbo.New()
 	data := make([]byte, 100)
 
 	for _, key := range mockBkt.Keys() {
