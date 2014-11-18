@@ -378,7 +378,7 @@ func (b *Backup) doPersist(f *os.File) error {
 		if err != nil {
 			return err
 		}
-		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.BucketOwnerFull, s3.Options{})
+		err = b.state.PutReader(dstName, f, fi.Size(), "", s3.PublicRead, s3.Options{})
 		if s3.IsS3Error(err, s3.ErrEntityTooLarge) {
 			localLog.Info("file too large, doing multipart upload")
 			return multipartPut(b.state, dstName, f, fi.Size())

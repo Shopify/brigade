@@ -93,7 +93,7 @@ func TestFindLastList(t *testing.T) {
 	want := []byte("hello world")
 	start := time.Now()
 	name := toSourceName(start)
-	if err := bkt.Put(name, want, "", s3.BucketOwnerFull, s3.Options{}); err != nil {
+	if err := bkt.Put(name, want, "", s3.PublicRead, s3.Options{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestFindLastList(t *testing.T) {
 	t.Logf("add an older one")
 	dontWant := []byte("bye world")
 	oldname := toSourceName(start.AddDate(-1, 0, 0))
-	if err := bkt.Put(oldname, dontWant, "", s3.BucketOwnerFull, s3.Options{}); err != nil {
+	if err := bkt.Put(oldname, dontWant, "", s3.PublicRead, s3.Options{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +122,7 @@ func TestFindLastList(t *testing.T) {
 	t.Logf("add a more recent one")
 	newWant := []byte("brave new world")
 	recentName := toSourceName(start.AddDate(1, 0, 0))
-	if err := bkt.Put(recentName, newWant, "", s3.BucketOwnerFull, s3.Options{}); err != nil {
+	if err := bkt.Put(recentName, newWant, "", s3.PublicRead, s3.Options{}); err != nil {
 		t.Fatal(err)
 	}
 

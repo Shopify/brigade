@@ -39,7 +39,7 @@ func doMultipartPut(bkt *s3.Bucket, keyname string, src s3.ReaderAtSeeker, size 
 	})
 	localLog.Info("initializing multipart upload")
 
-	multi, err := bkt.InitMulti(keyname, "", s3.BucketOwnerFull)
+	multi, err := bkt.InitMulti(keyname, "", s3.PublicRead)
 	if err != nil {
 		return fmt.Errorf("initializing multipart upload: %v", err)
 	}
