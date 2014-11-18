@@ -18,7 +18,7 @@ cloc:
 
 errcheck:
 	@echo "=== errcheck ==="
-	@errcheck ./...
+	@errcheck github.com/Shopify/brigade/...
 
 vet:
 	@echo "==== go vet ==="
