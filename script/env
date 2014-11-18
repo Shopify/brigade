@@ -7,8 +7,8 @@ if [[ $GO_ENV == "" ]]; then
 fi
 DEFAULT_GOPATH=$(pwd)/.go
 GOPATH=${GOPATH:=$DEFAULT_GOPATH}
-export GOPATH=$GOPATH
 export GOBIN=$GOPATH/bin
+export GOPATH="$(godep path):$GOPATH"
 export PATH=$PATH:$GOBIN
 echo "GOPATH = $GOPATH, GOBIN = $GOBIN"
 mkdir -p $GOBIN

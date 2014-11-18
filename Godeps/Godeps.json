@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/Shopify/brigade",
-	"GoVersion": "go1.3.1",
+	"GoVersion": "go1.3.3",
 	"Packages": [
 		"./..."
 	],
@@ -28,13 +28,13 @@
 			"Rev": "74cdbbe86fd8935294c2c12cb580c025885dccaa"
 		},
 		{
+			"ImportPath": "github.com/aybabtme/humanize",
+			"Rev": "87902871d213a70457e2bd51391073b660250ab6"
+		},
+		{
 			"ImportPath": "github.com/codegangsta/cli",
 			"Comment": "1.0.0-72-gbb91895",
 			"Rev": "bb9189510af1f49580c073c9e59e8bf288f0df27"
-		},
-		{
-			"ImportPath": "github.com/dustin/go-humanize",
-			"Rev": "3cd90eb3d932037b141d4daff9a012e1aee7e765"
 		},
 		{
 			"ImportPath": "github.com/dustin/randbo",
