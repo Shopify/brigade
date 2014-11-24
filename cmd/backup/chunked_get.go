@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"math"
 	"net/http"

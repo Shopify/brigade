@@ -6,7 +6,7 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"runtime"
 	"sync"
@@ -33,7 +33,7 @@ type SyncerFunc func(src *s3.Bucket, dst *s3.Bucket, key s3.Key) error
 // PutCopySyncer does a PutCopy call to S3, copying a key from src to dst
 // if both are in the same region.
 func PutCopySyncer(src, dst *s3.Bucket, key s3.Key) error {
-	_, err := dst.PutCopy(key.Key, s3.Private, s3.CopyOptions{}, src.Name+"/"+key.Key)
+	_, err := dst.PutCopy(key.Key, ACLForKey(src, key), s3.CopyOptions{}, src.Name+"/"+key.Key)
 	return err
 }
 
@@ -45,7 +45,39 @@ func GetPutSyncer(src, dst *s3.Bucket, key s3.Key) error {
 		return err
 	}
 	bufrd := bufio.NewReader(rd)
-	return src.PutReader(key.Key, bufrd, key.Size, "", s3.Private, s3.Options{})
+	return src.PutReader(key.Key, bufrd, key.Size, "", ACLForKey(src, key), s3.Options{})
+}
+
+var ACLForKey func(bkt *s3.Bucket, k s3.Key) s3.ACL = S3ACLForKey
+
+func MockACLForKey(bkt *s3.Bucket, k s3.Key) s3.ACL {
+	return s3.PublicRead
+}
+
+func S3ACLForKey(bkt *s3.Bucket, k s3.Key) s3.ACL {
+	if keyIsPrivate(bkt, k) {
+		return s3.Private
+	}
+
+	return s3.PublicRead
+}
+
+func keyIsPrivate(bkt *s3.Bucket, k s3.Key) bool {
+	resp, err := bkt.GetPermissions(k.Key)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"key":   k,
+			"error": err,
+		}).Warn("couldn't get acl for key")
+		return false
+	}
+
+	for _, grant := range resp.AccessControlList {
+		if grant.Grantee.URI == "http://acs.amazonaws.com/groups/global/AllUsers" {
+			return grant.Permission != "READ"
+		}
+	}
+	return true
 }
 
 // NewSyncTask creates a sync task that will sync keys from src onto dst.

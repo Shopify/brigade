@@ -6,14 +6,18 @@ import (
 	"github.com/Shopify/brigade/cmd/sync"
 	"github.com/Shopify/brigade/s3mock"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
 	"github.com/kr/pretty"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"math/rand"
 	"sort"
 	"testing"
 	"time"
 )
+
+func init() {
+	sync.ACLForKey = sync.MockACLForKey
+}
 
 func TestCanSync(t *testing.T) {
 	time.AfterFunc(time.Second*10, func() { panic("infinite loop?") })

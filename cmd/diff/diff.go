@@ -6,7 +6,7 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"runtime"
 	"sync"

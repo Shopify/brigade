@@ -3,8 +3,8 @@ package backup
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
 	"github.com/aybabtme/humanize"
+	"github.com/pushrax/goamz/s3"
 )
 
 func multipartPut(bkt *s3.Bucket, keyname string, src s3.ReaderAtSeeker, size int64) error {
@@ -39,7 +39,7 @@ func doMultipartPut(bkt *s3.Bucket, keyname string, src s3.ReaderAtSeeker, size 
 	})
 	localLog.Info("initializing multipart upload")
 
-	multi, err := bkt.InitMulti(keyname, "", s3.PublicRead)
+	multi, err := bkt.InitMulti(keyname, "", s3.BucketOwnerFull)
 	if err != nil {
 		return fmt.Errorf("initializing multipart upload: %v", err)
 	}
