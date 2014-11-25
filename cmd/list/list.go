@@ -314,28 +314,40 @@ func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *J
 		// track duration + inflight requests
 		metrics.inflight.Add(1)
 		start := time.Now()
-		// list this path on the bkt
-		res, err := bkt.List(job.path, "/", "", MaxList)
-		job.duration = time.Since(start)
-		metrics.inflight.Add(-1)
 
-		if err != nil {
-			job.err = err
-			// when there's an error, sleep for a bit before reenqueuing
-			// the job. This avoids retrying keys that are on a partition
-			// that is overloaded, and various network issues.
-			attemptsSoFar := float64(MaxRetry - job.retryLeft + 1)
-			backoff := math.Pow(2.0, attemptsSoFar)
-			sleepFor := time.Duration(backoff) * InitRetry
+		marker := ""
 
-			logrus.WithField("backoff", backoff).Debug("worker is sleeping on error")
-			time.Sleep(sleepFor)
-			logrus.WithField("backoff", backoff).Debug("worker woke up")
-		} else {
-			// if all went well, set the job results
-			job.keys = res.Contents
-			job.followers = res.CommonPrefixes
+		for {
+			// list this path on the bkt
+			res, err := bkt.List(job.path, "/", marker, MaxList)
+			job.duration = time.Since(start)
+			metrics.inflight.Add(-1)
+
+			if err != nil {
+				job.err = err
+				// when there's an error, sleep for a bit before reenqueuing
+				// the job. This avoids retrying keys that are on a partition
+				// that is overloaded, and various network issues.
+				attemptsSoFar := float64(MaxRetry - job.retryLeft + 1)
+				backoff := math.Pow(2.0, attemptsSoFar)
+				sleepFor := time.Duration(backoff) * InitRetry
+
+				logrus.WithField("backoff", backoff).Debug("worker is sleeping on error")
+				time.Sleep(sleepFor)
+				logrus.WithField("backoff", backoff).Debug("worker woke up")
+			} else {
+				// if all went well, set the job results
+				job.keys = append(job.keys, res.Contents...)
+				job.followers = append(job.followers, res.CommonPrefixes...)
+			}
+
+			if res == nil || !res.IsTruncated {
+				break
+			}
+
+			marker = res.Contents[len(res.Contents)-1].Key
 		}
+
 		// send the job result back to the main loop, which will
 		// decided to reenqueue or not if there was an error
 		out <- job
