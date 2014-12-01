@@ -1,10 +1,7 @@
 package main
 
 import (
-	"code.google.com/p/go-uuid/uuid"
-	"encoding/hex"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/formatter"
 	"net/http"
 	"os"
 	"os/signal"
@@ -65,12 +62,6 @@ func main() {
 	go func() {
 		// don't monitor short tasks
 		time.Sleep(time.Second * 2)
-
-		id := hex.EncodeToString(uuid.NewUUID())[0:5]
-		// long tasks will have each field tagged with a task id
-		logrus.SetFormatter(formatter.Before(func(e *logrus.Entry) *logrus.Entry {
-			return e.WithField("task_id", id)
-		}, &logrus.TextFormatter{}))
 
 		logrus.WithFields(logrus.Fields{
 			"addr":    addr,
