@@ -417,7 +417,6 @@ func shouldAbort(err error) bool {
 		return false
 
 		// unless they're one of:
-	case s3.IsS3Error(err, s3.ErrAccessDenied):
 	case s3.IsS3Error(err, s3.ErrAccountProblem):
 	case s3.IsS3Error(err, s3.ErrCredentialsNotSupported):
 	case s3.IsS3Error(err, s3.ErrInvalidAccessKeyID):
