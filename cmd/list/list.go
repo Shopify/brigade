@@ -341,7 +341,7 @@ func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *J
 				job.followers = append(job.followers, res.CommonPrefixes...)
 			}
 
-			if res == nil || !res.IsTruncated {
+			if res == nil || len(res.Contents) == 0 || !res.IsTruncated {
 				break
 			}
 
