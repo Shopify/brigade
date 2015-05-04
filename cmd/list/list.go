@@ -311,13 +311,13 @@ func (l *listTask) jobsFromFollowers(newFollowers []string, workset *jobSet, vis
 func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *Job, out chan<- *Job) {
 	defer wg.Done()
 	for job := range jobs {
-		// track duration + inflight requests
-		metrics.inflight.Add(1)
+		// track duration
 		start := time.Now()
-
 		marker := ""
 
 		for {
+			metrics.inflight.Add(1)
+
 			// list this path on the bkt
 			res, err := bkt.List(job.path, "/", marker, MaxList)
 			job.duration = time.Since(start)
