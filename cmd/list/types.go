@@ -2,7 +2,7 @@ package list
 
 import (
 	"expvar"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"path"
 	"sync/atomic"
 	"time"

@@ -7,7 +7,7 @@ import (
 	"github.com/Shopify/brigade/cmd/list"
 	cmdsync "github.com/Shopify/brigade/cmd/sync"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"io/ioutil"
 	"os"

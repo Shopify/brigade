@@ -2,10 +2,10 @@ package s3mock
 
 import (
 	"encoding/json"
-	"github.com/aybabtme/goamz/aws"
-	"github.com/aybabtme/goamz/s3"
-	"github.com/aybabtme/goamz/s3/s3test"
 	"github.com/dustin/randbo"
+	"github.com/pushrax/goamz/aws"
+	"github.com/pushrax/goamz/s3"
+	"github.com/pushrax/goamz/s3/s3test"
 	"io"
 	"testing"
 )
@@ -95,7 +95,7 @@ func NewPerfBucket(t *testing.T) MockBucket {
 	bucketname := "shopify-perf"
 	perffilename := "bucket_list.json"
 
-	perfKeys, ok := GetBucketListJson(perffilename)
+	perfKeys, ok := GetBucketListJSON(perffilename)
 	if !ok {
 		t.Fatalf("s3mock.NewPerfBucket: expected content in %q, got nothing", perffilename)
 	}

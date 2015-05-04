@@ -6,7 +6,7 @@ import (
 	"github.com/Shopify/brigade/cmd/list"
 	"github.com/Shopify/brigade/s3mock"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"io"
 	"io/ioutil"
 	"sort"

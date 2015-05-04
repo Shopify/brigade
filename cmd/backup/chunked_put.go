@@ -3,8 +3,8 @@ package backup
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/s3"
 	"github.com/aybabtme/humanize"
+	"github.com/pushrax/goamz/s3"
 )
 
 func multipartPut(bkt *s3.Bucket, keyname string, src s3.ReaderAtSeeker, size int64) error {

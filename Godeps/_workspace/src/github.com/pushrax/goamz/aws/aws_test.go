@@ -1,7 +1,7 @@
 package aws_test
 
 import (
-	"github.com/aybabtme/goamz/aws"
+	"github.com/pushrax/goamz/aws"
 	"gopkg.in/check.v1"
 	"io/ioutil"
 	"os"

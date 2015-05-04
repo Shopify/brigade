@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/Sirupsen/logrus"
-	"github.com/aybabtme/goamz/aws"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/aws"
+	"github.com/pushrax/goamz/s3"
 
 	"testing"
 	"time"
@@ -103,7 +103,7 @@ func withAWSBucket(t *testing.T, action func(t *testing.T, bkt *s3.Bucket) error
 	s.ReadTimeout = time.Second * 10
 	s.ConnectTimeout = time.Second * 10
 	bkt := s.Bucket(fmt.Sprintf("shopify-brigade-integration-test-delete-me-%d", time.Now().Unix()))
-	if err := bkt.PutBucket(s3.BucketOwnerFull); err != nil {
+	if err := bkt.PutBucket(s3.PublicRead); err != nil {
 		t.Fatalf("bucket cannot be created: %v", err)
 	}
 	defer func() {
@@ -146,7 +146,7 @@ func smokeTestPutThenFetch(t *testing.T, bkt *s3.Bucket) error {
 		bytes.NewReader(want),
 		int64(len(want)),
 		"",
-		s3.BucketOwnerFull,
+		s3.PublicRead,
 		s3.Options{},
 	)
 	if err != nil {

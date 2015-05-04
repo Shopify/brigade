@@ -3,7 +3,7 @@ package s3mock_test
 import (
 	"bytes"
 	"github.com/Shopify/brigade/s3mock"
-	"github.com/aybabtme/goamz/s3"
+	"github.com/pushrax/goamz/s3"
 	"testing"
 )
 
