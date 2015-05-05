@@ -247,7 +247,7 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.
 			metrics.jobsOk.Add(1)
 		}
 
-		l.visitKeys(doneJob.keys, keyVisitor, visited)
+		l.visitKeys(doneJob.keys, keyVisitor)
 
 		for _, job := range l.jobsFromFollowers(doneJob.followers, workSet, visited) {
 			followers.Add(job)
@@ -268,13 +268,8 @@ func (l *listTask) walkPath(bkt *s3.Bucket, root string, keyVisitor func(key s3.
 	return nil
 }
 
-func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key), visited map[string]struct{}) {
+func (l *listTask) visitKeys(keys []s3.Key, visitor func(s3.Key)) {
 	for _, key := range keys {
-		if _, ok := visited[key.Key]; ok {
-			logrus.WithField("key", key).Warn("deduplicate key")
-			continue
-		}
-		visited[key.Key] = struct{}{}
 		metrics.totalKeys.Add(1)
 		metrics.totalBucketSize.Add(int64(key.Size))
 
