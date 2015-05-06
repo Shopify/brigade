@@ -336,11 +336,11 @@ func (l *listTask) listWorker(wg *sync.WaitGroup, bkt *s3.Bucket, jobs <-chan *J
 				job.followers = append(job.followers, res.CommonPrefixes...)
 			}
 
-			if res == nil || len(res.Contents) == 0 || !res.IsTruncated {
+			if res == nil || !res.IsTruncated {
 				break
 			}
 
-			marker = res.Contents[len(res.Contents)-1].Key
+			marker = res.NextMarker
 		}
 
 		// send the job result back to the main loop, which will
