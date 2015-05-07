@@ -43,6 +43,10 @@ import (
 	"time"
 )
 
+func init() {
+	logrus.SetLevel(logrus.DebugLevel)
+}
+
 var (
 	// MaxList is the maximum number of keys to accept from a call to LIST an s3
 	// prefix.
