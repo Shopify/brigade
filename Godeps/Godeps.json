@@ -27,11 +27,11 @@
 		},
 		{
 			"ImportPath": "github.com/pushrax/goamz/aws",
-			"Rev": "56fc3a85f1ea07f1d54a7eb79266b292b7a1600c"
+			"Rev": "7e92e09019f097c0e61c56dbb47a4d66cff00979"
 		},
 		{
 			"ImportPath": "github.com/pushrax/goamz/s3",
-			"Rev": "56fc3a85f1ea07f1d54a7eb79266b292b7a1600c"
+			"Rev": "7e92e09019f097c0e61c56dbb47a4d66cff00979"
 		}
 	]
 }

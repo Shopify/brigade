@@ -179,8 +179,8 @@ func (b *Bucket) Get(path string) (data []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+	defer body.Close()
 	data, err = ioutil.ReadAll(body)
-	body.Close()
 	return data, err
 }
 
@@ -956,6 +956,7 @@ func (s3 *S3) run(req *request, resp interface{}) (*http.Response, error) {
 		log.Printf("} -> %s\n", dump)
 	}
 	if hresp.StatusCode != 200 && hresp.StatusCode != 204 && hresp.StatusCode != 206 {
+		defer hresp.Body.Close()
 		return nil, buildError(hresp)
 	}
 	if resp != nil {
