@@ -54,7 +54,7 @@ var (
 
 	// MaxRetry is the number of time a worker will retry a LIST on a path,
 	// given that the error was retryable.
-	MaxRetry  = 5
+	MaxRetry  = 20
 	InitRetry = time.Second * 2
 )
 
