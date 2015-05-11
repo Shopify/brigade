@@ -96,7 +96,7 @@ func NewSyncTask(src, dst *s3.Bucket) (*SyncTask, error) {
 
 	return &SyncTask{
 		RetryBase:  time.Second,
-		MaxRetry:   10,
+		MaxRetry:   20,
 		DecodePara: runtime.NumCPU(),
 		SyncPara:   1000,
 		Sync:       PutCopySyncer,
